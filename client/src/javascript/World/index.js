@@ -694,7 +694,9 @@ export default class World
             const hx    =  1 - 2 * (quat.y * quat.y + quat.z * quat.z)
             const hy    =  2 * (quat.x * quat.y + quat.z * quat.w)
             // Car's right direction: (hy, -hx) in XY plane
-            const steer = (this.controls.actions.right ? 1 : 0) - (this.controls.actions.left ? 1 : 0)
+            const steer = typeof this.controls.actions.steer === 'number'
+                ? this.controls.actions.steer
+                : (this.controls.actions.right ? 1 : 0) - (this.controls.actions.left ? 1 : 0)
             const ahead = norm * steer * LOOK_MAX
 
             const txTarget = carPos.x + hy  * ahead

@@ -60,7 +60,7 @@ export class GameRoom {
           name:     name || 'Anonymous',
           carColor: carColor ?? 0,
           carType:  carType || 'default',
-          actions:  { up: false, down: false, left: false, right: false, brake: false, boost: false },
+          actions:  { up: false, down: false, left: false, right: false, brake: false, boost: false, steer: 0, throttle: 0 },
           spawnXY:  { x: spawnPos.x, y: spawnPos.y },
         })
 

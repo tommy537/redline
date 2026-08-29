@@ -1260,7 +1260,8 @@
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.12);
     box-shadow: 0 0 14px rgba(255, 255, 255, 0.30);
-    transition: transform 0.04s linear;
+    transition: none;
+    will-change: transform;
     pointer-events: none;
 }
 

@@ -27,7 +27,7 @@ export default class Physics
 
         this.time.on('tick', () =>
         {
-            this.world.step(this.time.delta / 1000)
+            this.world.step(1 / 60, this.time.delta / 1000, 3)
         })
     }
 
@@ -489,36 +489,15 @@ export default class Physics
              * Steering
              */
             {
-                const steerStrength = this.time.delta * this.car.options.controlsSteeringSpeed
+                const actions = this.controls.actions
+                const steerInput = typeof actions.steer === 'number'
+                    ? THREE.MathUtils.clamp(actions.steer, -1, 1)
+                    : (actions.right ? 1 : 0) - (actions.left ? 1 : 0)
+                const speedFactor = THREE.MathUtils.clamp(1 - this.car.speed * 3, 0.45, 1)
+                const targetSteering = steerInput * this.car.options.controlsSteeringMax * speedFactor
+                const response = Math.min(1, this.time.delta * 0.012)
 
-                // Steer right
-                if(this.controls.actions.right)
-                {
-                    this.car.steering += steerStrength
-                }
-                // Steer left
-                else if(this.controls.actions.left)
-                {
-                    this.car.steering -= steerStrength
-                }
-                // Steer center
-                else
-                {
-                    if(Math.abs(this.car.steering) > steerStrength)
-                    {
-                        this.car.steering -= steerStrength * Math.sign(this.car.steering)
-                    }
-                    else
-                    {
-                        this.car.steering = 0
-                    }
-                }
-
-                // Clamp steer
-                if(Math.abs(this.car.steering) > this.car.options.controlsSteeringMax)
-                {
-                    this.car.steering = Math.sign(this.car.steering) * this.car.options.controlsSteeringMax
-                }
+                this.car.steering += (targetSteering - this.car.steering) * response
             }
 
             // Update wheels
@@ -537,13 +516,19 @@ export default class Physics
             const accelerationSpeed = this.controls.actions.boost ? this.car.options.controlsAcceleratingSpeedBoost : this.car.options.controlsAcceleratingSpeed
             const accelerateStrength = 17 * accelerationSpeed
             const controlsAcceleratinMaxSpeed = this.controls.actions.boost ? this.car.options.controlsAcceleratinMaxSpeedBoost : this.car.options.controlsAcceleratinMaxSpeed
+            const analogThrottle = typeof this.controls.actions.throttle === 'number'
+                ? THREE.MathUtils.clamp(this.controls.actions.throttle, -1, 1)
+                : 0
+            const throttle = analogThrottle !== 0
+                ? analogThrottle
+                : this.controls.actions.up ? 1 : this.controls.actions.down ? -1 : 0
 
             // Accelerate up
-            if(this.controls.actions.up)
+            if(throttle > 0)
             {
                 if(this.car.speed < controlsAcceleratinMaxSpeed || !this.car.goingForward)
                 {
-                    this.car.accelerating = accelerateStrength
+                    this.car.accelerating = accelerateStrength * throttle
                 }
                 else
                 {
@@ -552,11 +537,11 @@ export default class Physics
             }
 
             // Accelerate Down
-            else if(this.controls.actions.down)
+            else if(throttle < 0)
             {
                 if(this.car.speed < controlsAcceleratinMaxSpeed || this.car.goingForward)
                 {
-                    this.car.accelerating = - accelerateStrength
+                    this.car.accelerating = accelerateStrength * throttle
                 }
                 else
                 {

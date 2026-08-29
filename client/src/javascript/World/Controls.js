@@ -47,6 +47,8 @@ export default class Controls extends EventEmitter
         this.actions.left = false
         this.actions.brake = false
         this.actions.boost = false
+        this.actions.steer = 0
+        this.actions.throttle = 0
 
         document.addEventListener('visibilitychange', () =>
         {
@@ -58,6 +60,8 @@ export default class Controls extends EventEmitter
                 this.actions.left = false
                 this.actions.brake = false
                 this.actions.boost = false
+                this.actions.steer = 0
+                this.actions.throttle = 0
                 this._sendInput()
             }
         })
@@ -88,12 +92,14 @@ export default class Controls extends EventEmitter
                 case 'KeyW':
                     this.camera.pan.reset()
                     this.actions.up = true
+                    this.actions.throttle = 1
                     this._sendInput()
                     break
 
                 case 'ArrowRight':
                 case 'KeyD':
                     this.actions.right = true
+                    this.actions.steer = 1
                     this._sendInput()
                     break
 
@@ -101,12 +107,14 @@ export default class Controls extends EventEmitter
                 case 'KeyS':
                     this.camera.pan.reset()
                     this.actions.down = true
+                    this.actions.throttle = -1
                     this._sendInput()
                     break
 
                 case 'ArrowLeft':
                 case 'KeyA':
                     this.actions.left = true
+                    this.actions.steer = -1
                     this._sendInput()
                     break
 
@@ -143,24 +151,28 @@ export default class Controls extends EventEmitter
                 case 'ArrowUp':
                 case 'KeyW':
                     this.actions.up = false
+                    this.actions.throttle = this.actions.down ? -1 : 0
                     this._sendInput()
                     break
 
                 case 'ArrowRight':
                 case 'KeyD':
                     this.actions.right = false
+                    this.actions.steer = this.actions.left ? -1 : 0
                     this._sendInput()
                     break
 
                 case 'ArrowDown':
                 case 'KeyS':
                     this.actions.down = false
+                    this.actions.throttle = this.actions.up ? 1 : 0
                     this._sendInput()
                     break
 
                 case 'ArrowLeft':
                 case 'KeyA':
                     this.actions.left = false
+                    this.actions.steer = this.actions.right ? 1 : 0
                     this._sendInput()
                     break
 
@@ -218,16 +230,16 @@ export default class Controls extends EventEmitter
         }
     }
 
-    // ── 2-axis joystick → actions.up/down/left/right ──────────────────────
+    // ── 2-axis analog joystick ───────────────────────────────────────────
     _buildTouchJoystick()
     {
         const joy = this.touch.joystick = {
             active:   false,
-            touchId:  null,
+            pointerId: null,
             current:  { x: 0, y: 0 },
             origin:   { x: 0, y: 0 },   // where the finger first landed
-            lastUp:   false,             // Y-direction at last release (for re-touch inheritance)
-            lastDown: false,
+            sentSteer: 0,
+            sentThrottle: 0,
         }
 
         const $j = document.createElement('div')
@@ -254,21 +266,29 @@ export default class Controls extends EventEmitter
 
             const dx = joy.current.x - joy.origin.x
             const dy = joy.current.y - joy.origin.y
-            const DZ = 14   // deadzone in px (relative to touch origin)
-
-            const left  = dx < -DZ
-            const right = dx >  DZ
-            const up    = dy < -DZ
-            const down  = dy >  DZ
-
-            // Refcount: only update up/down when outside the vertical deadzone.
-            // While the thumb stays inside the deadzone the last Y-direction
-            // is preserved, preventing accidental gas cuts from micro-drift.
-            if(up || down)
+            const DEADZONE = 7
+            const MAX_RADIUS = 52
+            const normalizeAxis = (value) =>
             {
-                if(up)   this._upHeldBy.add('joystick');   else this._upHeldBy.delete('joystick')
-                if(down) this._downHeldBy.add('joystick'); else this._downHeldBy.delete('joystick')
+                const magnitude = Math.min(Math.abs(value), MAX_RADIUS)
+                if(magnitude <= DEADZONE) return 0
+                return Math.sign(value) * (magnitude - DEADZONE) / (MAX_RADIUS - DEADZONE)
             }
+
+            const normalizedX = normalizeAxis(dx)
+            const normalizedY = normalizeAxis(dy)
+            const steer = normalizedX === 0
+                ? 0
+                : Math.sign(normalizedX) * Math.pow(Math.abs(normalizedX), 1.5)
+            const throttle = - normalizedY
+
+            const left  = steer < 0
+            const right = steer > 0
+            const up    = throttle > 0
+            const down  = throttle < 0
+
+            if(up)   this._upHeldBy.add('joystick');   else this._upHeldBy.delete('joystick')
+            if(down) this._downHeldBy.add('joystick'); else this._downHeldBy.delete('joystick')
             const newUp   = this._upHeldBy.size   > 0
             const newDown = this._downHeldBy.size > 0
 
@@ -276,67 +296,63 @@ export default class Controls extends EventEmitter
                 left   !== this.actions.left  ||
                 right  !== this.actions.right ||
                 newUp  !== this.actions.up    ||
-                newDown !== this.actions.down
+                newDown !== this.actions.down ||
+                Math.abs(steer - joy.sentSteer) >= 0.01 ||
+                Math.abs(throttle - joy.sentThrottle) >= 0.01
 
             this.actions.left  = left
             this.actions.right = right
             this.actions.up    = newUp
             this.actions.down  = newDown
+            this.actions.steer = steer
+            this.actions.throttle = throttle
 
-            if(changed) this._sendInput()
+            if(changed)
+            {
+                joy.sentSteer = steer
+                joy.sentThrottle = throttle
+                this._sendInput()
+            }
 
             // Cursor visualization: also relative to origin so the visual
             // matches where the user feels their thumb has moved
-            const dist = Math.min(Math.hypot(dx, dy), 50)
+            const dist = Math.min(Math.hypot(dx, dy), MAX_RADIUS)
             const ang  = Math.atan2(dy, dx)
             joy.$cursor.style.transform =
                 `translate(${Math.cos(ang) * dist}px, ${Math.sin(ang) * dist}px)`
         })
 
-        // Touchstart: snapshot the landing point as the new origin so the
+        // Pointer down: snapshot the landing point as the new origin so the
         // first frame doesn't read any deflection from a casual contact.
-        $j.addEventListener('touchstart', (e) =>
+        $j.addEventListener('pointerdown', (e) =>
         {
             e.preventDefault()
-            if(joy.active) return   // ignore stray second touch on the joystick area
-            const t = e.changedTouches[0]
-            if(!t) return
+            if(joy.active) return
             joy.active    = true
-            joy.touchId   = t.identifier
-            joy.origin.x  = t.clientX
-            joy.origin.y  = t.clientY
-            joy.current.x = t.clientX
-            joy.current.y = t.clientY
-            // Restore the direction from the previous touch so a brief
-            // lift-and-re-touch doesn't cut the gas for even one frame.
-            if(joy.lastUp)   this._upHeldBy.add('joystick')
-            if(joy.lastDown) this._downHeldBy.add('joystick')
+            joy.pointerId = e.pointerId
+            joy.origin.x  = e.clientX
+            joy.origin.y  = e.clientY
+            joy.current.x = e.clientX
+            joy.current.y = e.clientY
+            $j.setPointerCapture(e.pointerId)
             this.camera?.pan?.reset?.()
-        }, { passive: false })
+        })
 
-        // …but track move + release on document so the finger can wander
-        document.addEventListener('touchmove', (e) =>
+        $j.addEventListener('pointermove', (e) =>
         {
-            if(!joy.active) return
-            const t = [...e.changedTouches].find(tc => tc.identifier === joy.touchId)
-            if(!t) return
+            if(!joy.active || e.pointerId !== joy.pointerId) return
             e.preventDefault()
-            joy.current.x = t.clientX
-            joy.current.y = t.clientY
-        }, { passive: false })
+            joy.current.x = e.clientX
+            joy.current.y = e.clientY
+        })
 
         const releaseJoy = (e) =>
         {
-            if(!joy.active) return
-            const t = [...e.changedTouches].find(tc => tc.identifier === joy.touchId)
-            if(!t) return
+            if(!joy.active || e.pointerId !== joy.pointerId) return
             joy.active  = false
-            joy.touchId = null
+            joy.pointerId = null
             joy.$cursor.style.transform = 'translate(0,0)'
 
-            // Remember Y-direction for the next re-touch, then clear.
-            joy.lastUp   = this._upHeldBy.has('joystick')
-            joy.lastDown = this._downHeldBy.has('joystick')
             this._upHeldBy.delete('joystick')
             this._downHeldBy.delete('joystick')
             const newUp   = this._upHeldBy.size   > 0
@@ -347,10 +363,14 @@ export default class Controls extends EventEmitter
             if(this.actions.right)             { this.actions.right = false; changed = true }
             if(this.actions.up   !== newUp)    { this.actions.up    = newUp;  changed = true }
             if(this.actions.down !== newDown)  { this.actions.down  = newDown; changed = true }
+            if(this.actions.steer !== 0)        { this.actions.steer = 0; changed = true }
+            if(this.actions.throttle !== 0)     { this.actions.throttle = 0; changed = true }
+            joy.sentSteer = 0
+            joy.sentThrottle = 0
             if(changed) this._sendInput()
         }
-        document.addEventListener('touchend',    releaseJoy)
-        document.addEventListener('touchcancel', releaseJoy)
+        $j.addEventListener('pointerup', releaseJoy)
+        $j.addEventListener('pointercancel', releaseJoy)
     }
 
     // ── Right-thumb action buttons ───────────────────────────────────────
@@ -375,16 +395,27 @@ export default class Controls extends EventEmitter
 
             this.touch.$root.appendChild($b)
 
-            $b.addEventListener('touchstart', (e) =>
+            let pointerId = null
+
+            $b.addEventListener('pointerdown', (e) =>
             {
                 e.preventDefault()
+                if(pointerId !== null) return
+                pointerId = e.pointerId
+                $b.setPointerCapture(e.pointerId)
                 $b.classList.add('active')
                 onPress()
-            }, { passive: false })
+            })
 
-            const release = () => { $b.classList.remove('active'); onRelease() }
-            $b.addEventListener('touchend',    release)
-            $b.addEventListener('touchcancel', release)
+            const release = (e) =>
+            {
+                if(e.pointerId !== pointerId) return
+                pointerId = null
+                $b.classList.remove('active')
+                onRelease()
+            }
+            $b.addEventListener('pointerup', release)
+            $b.addEventListener('pointercancel', release)
             return $b
         }
 
@@ -400,13 +431,14 @@ export default class Controls extends EventEmitter
             $b.textContent = label
             this.touch.$root.appendChild($b)
 
-            $b.addEventListener('touchstart', (e) =>
+            $b.addEventListener('pointerdown', (e) =>
             {
                 e.preventDefault()
+                $b.setPointerCapture(e.pointerId)
                 $b.classList.add('active')
                 window.setTimeout(() => $b.classList.remove('active'), 120)
                 onTap()
-            }, { passive: false })
+            })
             return $b
         }
 
@@ -420,6 +452,7 @@ export default class Controls extends EventEmitter
             () =>
             {
                 this._upHeldBy.add('boost')
+                this.actions.up = true
                 this.actions.boost = true
                 this.camera?.pan?.reset?.()
                 this._sendInput()
@@ -427,6 +460,7 @@ export default class Controls extends EventEmitter
             () =>
             {
                 this._upHeldBy.delete('boost')
+                this.actions.up = this._upHeldBy.size > 0
                 this.actions.boost = false
                 this._sendInput()
             },
