@@ -1,7 +1,7 @@
 import EventEmitter from '../Utils/EventEmitter.js'
 
 const MAX_HP      = 100
-const RESPAWN_MS  = 3000
+const RESPAWN_MS  = 4000
 
 export default class HealthSystem extends EventEmitter
 {
@@ -30,6 +30,7 @@ export default class HealthSystem extends EventEmitter
     }
 
     isDead() { return this._dead }
+    getRespawnSeconds() { return Math.ceil(RESPAWN_MS / 1000) }
 
     _die()
     {

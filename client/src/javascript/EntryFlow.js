@@ -24,9 +24,9 @@ const MODE_DATA = {
         name:       'TEAM BATTLE',
         icon:       '⚔️',
         accent:     'var(--rl-amber)',
-        objective:  'Fight for <em>Red or Blue</em>. Enemy kills score for your team; friendly fire is disabled.',
+        objective:  'Fight for <em>Red or Blue</em> for 3 minutes. A tie becomes sudden death; the next kill wins.',
         controls:   '<kbd>WASD</kbd> drive · <kbd>SHIFT</kbd> boost · <kbd>X</kbd> brake · <kbd>SPACE</kbd> jump · <kbd>F</kbd> fire · <kbd>R</kbd> respawn',
-        tips:       'Teams are auto-balanced when players join. Stay near teammates, collect ammo and health, and focus enemy cars.',
+        tips:       'Choose a team, set your handicap, then Ready up. The host starts when everyone is ready. A trailing team receives a small catch-up boost.',
     },
 }
 

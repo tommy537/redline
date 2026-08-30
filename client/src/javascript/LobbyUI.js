@@ -312,6 +312,7 @@ export default class LobbyUI
         {
             this._renderTeamState(state)
         })
+        this.network.on('team:startDenied', ({ reason }) => this.showToast(reason, 4000))
     }
 
     _updateHUD()
@@ -344,7 +345,9 @@ export default class LobbyUI
                 const $item = document.createElement('li')
                 const isLocal = player.id === this.network.localId
                 if(isLocal) $item.classList.add('is-you')
-                $item.textContent = `${player.isBot ? '🤖 ' : ''}${isLocal ? `${player.name} (YOU)` : player.name}`
+                const badges = `${player.isHost ? '👑 ' : ''}${player.isBot ? '🤖 ' : ''}`
+                const ready = player.matchReady ? ' ✓' : ''
+                $item.textContent = `${badges}${isLocal ? `${player.name} (YOU)` : player.name}${ready}`
                 $list.appendChild($item)
             })
         }

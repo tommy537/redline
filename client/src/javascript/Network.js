@@ -141,6 +141,7 @@ export default class Network extends EventEmitter
             this.teamState = data
             this.trigger('team:state', [data])
         })
+        this.socket.on('team:startDenied', (data) => this.trigger('team:startDenied', [data]))
 
         this.socket.on('combat:meteor', (data) =>
         {
@@ -235,6 +236,16 @@ export default class Network extends EventEmitter
     requestTeamRematch()
     {
         this.socket.emit('team:rematch')
+    }
+
+    setTeamReady(ready)
+    {
+        this.socket.emit('team:setReady', { ready })
+    }
+
+    startTeamMatch()
+    {
+        this.socket.emit('team:startMatch')
     }
 
     disconnect()

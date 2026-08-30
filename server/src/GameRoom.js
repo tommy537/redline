@@ -7,6 +7,17 @@ const TEAM_MAX_PLAYERS = 8
 const TEAM_SIZE = 4
 const TEAM_MATCH_MS = 3 * 60 * 1000
 const TEAM_COUNTDOWN_MS = 3000
+const TEAM_BALANCE = {
+  maxDamage: 30,
+  handicap: { easy: 0.70, normal: 1, pro: 1.15 },
+  catchUpThreshold: 2,
+  catchUpDamage: 1.15,
+  maxBotsPerTeam: 2,
+}
+const BOT_OBSTACLES = [
+  { x: 0, y: 0, r: 11 }, { x: 28, y: 28, r: 10 },
+  { x: -28, y: 29, r: 8 }, { x: 28, y: -28, r: 7 }, { x: -28, y: -28, r: 7 },
+]
 const TEAM_SPAWNS = {
   red:  [{ x: -18, y: -40 }, { x: -6, y: -40 }, { x: 6, y: -40 }, { x: 18, y: -40 }],
   blue: [{ x: 18, y: 40 }, { x: 6, y: 40 }, { x: -6, y: 40 }, { x: -18, y: 40 }],
@@ -20,6 +31,7 @@ export class GameRoom {
     this.teamScores = { red: 0, blue: 0 }
     this.teamMatch = { state: 'waiting', startsAt: 0, endsAt: 0, winner: null, suddenDeath: false }
     this._botCounter = 0
+    this.teamHostId = null
 
     this._startLoop()
     this._setupSocketEvents()
@@ -58,6 +70,15 @@ export class GameRoom {
     return this._playersForMode('team-combat').filter(player => player.team === team).length
   }
 
+  _humanTeamPlayers() {
+    return this._playersForMode('team-combat').filter(player => !player.isBot)
+  }
+
+  _assignHost() {
+    const humans = this._humanTeamPlayers().sort((a, b) => a.joinedAt - b.joinedAt)
+    this.teamHostId = humans[0]?.id || null
+  }
+
   _teamSpawn(team) {
     const slots = TEAM_SPAWNS[team]
     const slot = this._teamCount(team) % slots.length
@@ -68,10 +89,10 @@ export class GameRoom {
     const players = this._playersForMode('team-combat')
     const makeRoster = team => players
       .filter(player => player.team === team)
-      .map(({ id, name, kills = 0, deaths = 0, isBot = false, handicap = 'normal', stats = {} }) =>
-        ({ id, name, kills, deaths, team, isBot, handicap, stats }))
+      .map(({ id, name, kills = 0, deaths = 0, isBot = false, handicap = 'normal', stats = {}, matchReady = false }) =>
+        ({ id, name, kills, deaths, team, isBot, handicap, stats, matchReady, isHost: id === this.teamHostId }))
 
-    const catchUpTeam = Math.abs(this.teamScores.red - this.teamScores.blue) >= 3
+    const catchUpTeam = Math.abs(this.teamScores.red - this.teamScores.blue) >= TEAM_BALANCE.catchUpThreshold
       ? (this.teamScores.red < this.teamScores.blue ? 'red' : 'blue')
       : null
 
@@ -79,6 +100,9 @@ export class GameRoom {
       red: { score: this.teamScores.red, players: makeRoster('red') },
       blue: { score: this.teamScores.blue, players: makeRoster('blue') },
       match: { ...this.teamMatch, serverNow: Date.now() },
+      hostId: this.teamHostId,
+      canStart: this._canStartTeamMatch(),
+      balance: { catchUpThreshold: TEAM_BALANCE.catchUpThreshold, catchUpDamage: TEAM_BALANCE.catchUpDamage },
       catchUpTeam,
       funStats: this._getFunStats(players),
     }
@@ -96,10 +120,18 @@ export class GameRoom {
 
   _maybeStartTeamMatch() {
     if (this.teamMatch.state !== 'waiting') return
-    if (this._teamCount('red') < 1 || this._teamCount('blue') < 1) return
+    if (!this._canStartTeamMatch()) return
     const startsAt = Date.now() + TEAM_COUNTDOWN_MS
     this.teamMatch = { state: 'countdown', startsAt, endsAt: startsAt + TEAM_MATCH_MS, winner: null, suddenDeath: false }
     this._broadcastTeamState()
+  }
+
+  _canStartTeamMatch() {
+    if (this.teamMatch.state !== 'waiting') return false
+    const humans = this._humanTeamPlayers()
+    return humans.length > 0 &&
+      this._teamCount('red') > 0 && this._teamCount('blue') > 0 &&
+      humans.every(player => player.matchReady)
   }
 
   _updateTeamMatch(now) {
@@ -130,6 +162,7 @@ export class GameRoom {
       player.kills = 0
       player.deaths = 0
       player.stats = { shots: 0, hits: 0, damage: 0, bumps: 0 }
+      if (!player.isBot) player.matchReady = false
     }
     this.teamMatch = { state: 'waiting', startsAt: 0, endsAt: 0, winner: null, suddenDeath: false }
     this._broadcastCombatLeaderboard('team-combat')
@@ -138,7 +171,8 @@ export class GameRoom {
   }
 
   _addBot(team) {
-    if (this._teamCount(team) >= TEAM_SIZE) return
+    const teamBots = this._playersForMode('team-combat').filter(player => player.team === team && player.isBot)
+    if (this._teamCount(team) >= TEAM_SIZE || teamBots.length >= TEAM_BALANCE.maxBotsPerTeam) return
     const id = `bot-${++this._botCounter}`
     const spawnPos = this._teamSpawn(team)
     this.physics.addCar(id, spawnPos)
@@ -149,6 +183,7 @@ export class GameRoom {
       spawnXY: { x: spawnPos.x, y: spawnPos.y }, kills: 0, deaths: 0, stats: { shots: 0, hits: 0, damage: 0, bumps: 0 },
       lastDamagedBy: null, lastDamagedAt: 0, lastDeathAt: 0,
       nextShotAt: Date.now() + 1800 + Math.random() * 1200,
+      matchReady: true,
     }
     this.players.set(id, player)
     this.io.to('team-combat').emit('player:joined', { id, name: player.name, carColor: player.carColor, carType: 'default', team, isBot: true })
@@ -162,9 +197,10 @@ export class GameRoom {
   _updateBots(now) {
     if (!['playing', 'sudden-death'].includes(this.teamMatch.state)) return
     for (const bot of this._playersForMode('team-combat').filter(player => player.isBot)) {
+      this._steerBot(bot)
       if (now < bot.nextShotAt) continue
       bot.nextShotAt = now + 1800 + Math.random() * 900
-      const enemies = this._playersForMode('team-combat').filter(player => player.team !== bot.team && !player.isBot)
+      const enemies = this._playersForMode('team-combat').filter(player => player.team !== bot.team)
       const target = enemies[Math.floor(Math.random() * enemies.length)]
       const targetSocket = target && this.io.sockets.sockets.get(target.id)
       const botCar = this.physics.cars.get(bot.id)
@@ -178,17 +214,72 @@ export class GameRoom {
       if (distance > 48 || distance < 1) continue
       bot.stats.shots += 1
       bot.stats.hits += 1
-      const handicapScale = target.handicap === 'easy' ? 0.75 : target.handicap === 'pro' ? 1.1 : 1
-      const catchUp = Math.abs(this.teamScores.red - this.teamScores.blue) >= 3 && this.teamScores[bot.team] < this.teamScores[target.team]
-      const amount = Math.round(12 * handicapScale * (catchUp ? 1.2 : 1) * 10) / 10
+      const handicapScale = TEAM_BALANCE.handicap[target.handicap] || 1
+      const catchUp = Math.abs(this.teamScores.red - this.teamScores.blue) >= TEAM_BALANCE.catchUpThreshold && this.teamScores[bot.team] < this.teamScores[target.team]
+      const amount = Math.round(12 * handicapScale * (catchUp ? TEAM_BALANCE.catchUpDamage : 1) * 10) / 10
       bot.stats.damage += amount
       target.lastDamagedBy = bot.id
       target.lastDamagedAt = now
       this.io.to('team-combat').emit('combat:missile', {
         fromId: bot.id, x: from.x, y: from.y, z: from.z + 0.8, dx: dx / distance, dy: dy / distance,
       })
-      targetSocket.emit('player:combatDamage', { fromId: bot.id, amount })
+      if (targetSocket) targetSocket.emit('player:combatDamage', { fromId: bot.id, amount })
+      else if (target.isBot) this._damageBot(target, bot, amount)
     }
+  }
+
+  _steerBot(bot) {
+    const car = this.physics.cars.get(bot.id)
+    if (!car) return
+    const pos = car.chassis.position
+    if (Math.abs(pos.x) > 48 || Math.abs(pos.y) > 48) {
+      pos.x = Math.max(-42, Math.min(42, pos.x))
+      pos.y = Math.max(-42, Math.min(42, pos.y))
+      car.chassis.velocity.set(0, 0, 0)
+      car.chassis.angularVelocity.set(0, 0, 0)
+      car.chassis.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), Math.atan2(-pos.y, -pos.x))
+    }
+    let target = null
+    if (bot.hp < 45) target = { x: 0, y: -32 }
+    if (!target) {
+      const enemies = this._playersForMode('team-combat').filter(player => player.team !== bot.team)
+      enemies.sort((a, b) => {
+        const ap = this.physics.cars.get(a.id)?.chassis.position
+        const bp = this.physics.cars.get(b.id)?.chassis.position
+        return (ap ? Math.hypot(ap.x - pos.x, ap.y - pos.y) : 999) - (bp ? Math.hypot(bp.x - pos.x, bp.y - pos.y) : 999)
+      })
+      const enemyPos = enemies[0] && this.physics.cars.get(enemies[0].id)?.chassis.position
+      if (enemyPos) target = { x: enemyPos.x, y: enemyPos.y }
+    }
+    if (!target) target = { x: 0, y: 0 }
+
+    let vx = target.x - pos.x
+    let vy = target.y - pos.y
+    if (bot.hp < 100 && Math.hypot(pos.x, pos.y + 32) < 4) bot.hp = Math.min(100, bot.hp + 0.15)
+    for (const obstacle of BOT_OBSTACLES) {
+      const ox = pos.x - obstacle.x
+      const oy = pos.y - obstacle.y
+      const distance = Math.hypot(ox, oy)
+      if (distance < obstacle.r && distance > 0.1) {
+        const force = (obstacle.r - distance) * 4
+        vx += ox / distance * force
+        vy += oy / distance * force
+      }
+    }
+    if (Math.abs(pos.x) > 43 || Math.abs(pos.y) > 43) {
+      vx = -pos.x * 2
+      vy = -pos.y * 2
+    }
+    const forward = car.chassis.quaternion.vmult(new CANNON.Vec3(1, 0, 0))
+    const desiredLength = Math.hypot(vx, vy) || 1
+    const desiredX = vx / desiredLength
+    const desiredY = vy / desiredLength
+    const cross = forward.x * desiredY - forward.y * desiredX
+    const dot = Math.max(-1, Math.min(1, forward.x * desiredX + forward.y * desiredY))
+    const angle = Math.atan2(cross, dot)
+    bot.actions.steer = Math.max(-1, Math.min(1, -angle * 1.4))
+    bot.actions.throttle = Math.abs(angle) > 1.8 ? 0.3 : 0.82
+    bot.actions.brake = Math.abs(angle) > 2.5
   }
 
   _scoreTeamKill(killer) {
@@ -218,7 +309,7 @@ export class GameRoom {
         botCar.chassis.position.set(bot.spawnXY.x, bot.spawnXY.y, 3)
         botCar.chassis.velocity.set(0, 0, 0)
       }
-    }, 3000)
+    }, 4000)
     this._broadcastCombatLeaderboard('team-combat')
     this._broadcastTeamState()
   }
@@ -270,15 +361,22 @@ export class GameRoom {
           : 'combat'
         const modePlayers = this._playersForMode(gameMode)
         const modeLimit = gameMode === 'team-combat' ? TEAM_MAX_PLAYERS : maxPlayers
-        if (modePlayers.length >= modeLimit) {
+        if (modePlayers.length >= modeLimit && gameMode !== 'team-combat') {
           socket.emit('room:full')
           return
         }
 
         const requestedTeam = preferredTeam === 'blue' ? 'blue' : 'red'
         if (gameMode === 'team-combat' && this._teamCount(requestedTeam) >= TEAM_SIZE) {
-          socket.emit('team:full', { team: requestedTeam })
-          return
+          const replaceableBot = this._playersForMode('team-combat').find(player => player.team === requestedTeam && player.isBot)
+          if (replaceableBot) {
+            this.physics.removeCar(replaceableBot.id)
+            this.players.delete(replaceableBot.id)
+            this.io.to('team-combat').emit('player:left', { id: replaceableBot.id })
+          } else {
+            socket.emit('team:full', { team: requestedTeam })
+            return
+          }
         }
         const team = gameMode === 'team-combat' ? requestedTeam : null
         const spawnPos = team ? this._teamSpawn(team) : this._getSpawnPosition(gameMode)
@@ -294,6 +392,8 @@ export class GameRoom {
           team,
           handicap: ['easy', 'normal', 'pro'].includes(handicap) ? handicap : 'normal',
           isBot: false,
+          joinedAt: Date.now(),
+          matchReady: false,
           hp: 100,
           stats: { shots: 0, hits: 0, damage: 0, bumps: 0 },
           actions:  { up: false, down: false, left: false, right: false, brake: false, boost: false, steer: 0, throttle: 0 },
@@ -304,6 +404,7 @@ export class GameRoom {
           lastDamagedAt: 0,
           lastDeathAt: 0,
         })
+        if (gameMode === 'team-combat' && !this.teamHostId) this.teamHostId = socket.id
 
         // Send existing players to new joiner
         const existingPlayers = [...this.players.values()]
@@ -398,11 +499,11 @@ export class GameRoom {
         const target = this.players.get(targetId)
         const sameMode = attacker && target && attacker.gameMode === target.gameMode
         const friendlyFire = sameMode && attacker.gameMode === 'team-combat' && attacker.team === target.team
-        const rawAmount = Number.isFinite(amount) && amount > 0 ? Math.min(amount, 100) : 0
-        const handicapScale = target?.handicap === 'easy' ? 0.75 : target?.handicap === 'pro' ? 1.1 : 1
-        const catchUpTeam = Math.abs(this.teamScores.red - this.teamScores.blue) >= 3
+        const rawAmount = Number.isFinite(amount) && amount > 0 ? Math.min(amount, TEAM_BALANCE.maxDamage) : 0
+        const handicapScale = TEAM_BALANCE.handicap[target?.handicap] || 1
+        const catchUpTeam = Math.abs(this.teamScores.red - this.teamScores.blue) >= TEAM_BALANCE.catchUpThreshold
           ? (this.teamScores.red < this.teamScores.blue ? 'red' : 'blue') : null
-        const catchUpScale = attacker?.team && attacker.team === catchUpTeam ? 1.2 : 1
+        const catchUpScale = attacker?.team && attacker.team === catchUpTeam ? TEAM_BALANCE.catchUpDamage : 1
         const validAmount = Math.round(rawAmount * handicapScale * catchUpScale * 10) / 10
         const matchActive = attacker?.gameMode !== 'team-combat' || ['playing', 'sudden-death'].includes(this.teamMatch.state)
         if (sameMode && !friendlyFire && targetId !== socket.id && validAmount > 0 && matchActive) {
@@ -471,6 +572,23 @@ export class GameRoom {
         if (player?.gameMode === 'team-combat' && this.teamMatch.state === 'complete') this._resetTeamMatch()
       })
 
+      socket.on('team:setReady', ({ ready }) => {
+        const player = this.players.get(socket.id)
+        if (!player || player.gameMode !== 'team-combat' || this.teamMatch.state !== 'waiting') return
+        player.matchReady = Boolean(ready)
+        this._broadcastTeamState()
+      })
+
+      socket.on('team:startMatch', () => {
+        const player = this.players.get(socket.id)
+        if (!player || player.id !== this.teamHostId || player.gameMode !== 'team-combat') return
+        if (!this._canStartTeamMatch()) {
+          socket.emit('team:startDenied', { reason: 'Every human player must be ready and both teams need a player.' })
+          return
+        }
+        this._maybeStartTeamMatch()
+      })
+
       socket.on('disconnect', () => {
         this.physics.removeCar(socket.id)
         const player = this.players.get(socket.id)
@@ -479,6 +597,7 @@ export class GameRoom {
           this.io.to(player.gameMode).emit('player:left', { id: socket.id })
           this._broadcastCombatLeaderboard(player.gameMode)
           if (player.gameMode === 'team-combat') {
+            if (player.id === this.teamHostId) this._assignHost()
             const humans = this._playersForMode('team-combat').filter(p => !p.isBot)
             if (humans.length === 0) {
               for (const bot of this._playersForMode('team-combat').filter(p => p.isBot)) {
@@ -512,10 +631,6 @@ export class GameRoom {
 
       // Apply inputs
       for (const [id, player] of this.players) {
-        if (player.isBot) {
-          player.actions.steer = Math.sin(now / 1800 + this._botCounter) * 0.65
-          player.actions.throttle = 0.7
-        }
         this.physics.applyInputs(id, player.actions)
       }
 

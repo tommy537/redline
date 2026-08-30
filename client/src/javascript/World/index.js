@@ -794,6 +794,11 @@ export default class World
         this.controls.on('action', (name) =>
         {
             if(name !== 'fire') return
+            if(this.config.gameMode === 'team-combat' && !['playing', 'sudden-death'].includes(this._teamState?.match?.state))
+            {
+                this._showTeamEvent('WAIT FOR START', '#ffc83d')
+                return
+            }
             const ok = this.weapons.fire()
             if(!ok && this.weapons.ammo <= 0)
                 this._showCombatPickup('NO AMMO', '#e74c3c')
@@ -817,7 +822,7 @@ export default class World
 
             const $ov = document.getElementById('death-overlay')
             if($ov) $ov.classList.add('visible')
-            let t = 3
+            let t = this.healthSystem.getRespawnSeconds()
             const $timer = document.getElementById('death-timer')
             const tick = () =>
             {
@@ -885,6 +890,7 @@ export default class World
             weapons:      this.weapons,
             sounds:       this.sounds,
             onShake:      () => this._shakeCamera(),
+            damageEnabled: () => this.config.gameMode !== 'team-combat' || ['playing', 'sudden-death'].includes(this._teamState?.match?.state),
         })
 
         if(this.network)
@@ -1294,10 +1300,16 @@ export default class World
             }
 
             this.network.on('combat:leaderboard', applyLeaderboard)
-            this.network.on('combat:kill', ({ killerId }) =>
+            this.network.on('combat:kill', ({ killerId, killerTeam }) =>
             {
                 if(killerId === this.network.localId)
                     this._showCombatPickup?.('+1 KILL', '#FF2E4D')
+                if(teamCombat)
+                {
+                    const friendly = killerTeam === this.network.localTeam
+                    this._showTeamEvent(friendly ? 'YOUR TEAM SCORES!' : 'ENEMY SCORES', friendly ? '#61e894' : '#ff4963')
+                    this.sounds?.playTone(friendly ? 880 : 220, 0.18, friendly ? 'triangle' : 'sawtooth', 0.14)
+                }
             })
 
             if(teamCombat)
@@ -1317,6 +1329,14 @@ export default class World
                 this.network.on('team:state', applyTeamScore)
                 if(this.network.teamState) applyTeamScore(this.network.teamState)
                 document.getElementById('team-scoreboard')?.classList.add('visible')
+                document.getElementById('team-ready-panel')?.classList.add('visible')
+                document.getElementById('trp-ready')?.addEventListener('click', () =>
+                {
+                    const local = this._findLocalTeamPlayer(this._teamState)
+                    this.network.setTeamReady(!local?.matchReady)
+                })
+                document.getElementById('trp-start')?.addEventListener('click', () => this.network.startTeamMatch())
+                this.network.on('team:startDenied', ({ reason }) => this._showTeamEvent(reason || 'NOT READY', '#ffc83d'))
                 document.getElementById('tm-rematch')?.addEventListener('click', () =>
                 {
                     document.getElementById('team-match-complete')?.classList.remove('visible')
@@ -1332,18 +1352,49 @@ export default class World
 
     _renderTeamMatch(state)
     {
+        const previous = this._teamState
         this._teamState = state
         const setText = (id, value) => { const el = document.getElementById(id); if(el) el.textContent = value }
         setText('ts-red-score', state.red?.score ?? 0)
         setText('ts-blue-score', state.blue?.score ?? 0)
+        if(previous && ((previous.red?.score ?? 0) !== (state.red?.score ?? 0) || (previous.blue?.score ?? 0) !== (state.blue?.score ?? 0)))
+        {
+            const $scoreboard = document.getElementById('team-scoreboard')
+            $scoreboard?.classList.remove('score-pulse')
+            void $scoreboard?.offsetWidth
+            $scoreboard?.classList.add('score-pulse')
+        }
 
         const match = state.match || { state: 'waiting' }
         const status = match.state === 'waiting' ? 'Waiting for both teams'
             : match.state === 'countdown' ? 'Get ready'
             : match.state === 'sudden-death' ? 'Next kill wins'
-            : state.catchUpTeam ? `${state.catchUpTeam.toUpperCase()} catch-up +20% damage`
+            : state.catchUpTeam ? `${state.catchUpTeam.toUpperCase()} catch-up +${Math.round(((state.balance?.catchUpDamage || 1) - 1) * 100)}% damage`
             : 'Team Battle · 3 minutes'
         setText('ts-status', status)
+        this._renderTeamReadyPanel(state)
+
+        if(previous?.match?.state !== match.state)
+        {
+            if(match.state === 'countdown') this._showTeamEvent('GET READY', '#ffffff')
+            if(match.state === 'playing')
+            {
+                this._showTeamEvent('BATTLE!', '#ff3655')
+                this.sounds?.playTone(980, 0.3, 'square', 0.13)
+            }
+            if(match.state === 'sudden-death')
+            {
+                this._showTeamEvent('SUDDEN DEATH', '#ffc83d')
+                this.sounds?.play('horn', 10)
+            }
+            if(match.state === 'complete')
+            {
+                const won = match.winner === this.network?.localTeam
+                this._showTeamEvent(won ? 'VICTORY!' : 'GOOD GAME!', won ? '#61e894' : '#ffffff')
+                this.sounds?.playTone(won ? 784 : 330, 0.35, 'triangle', 0.16)
+                setTimeout(() => this.sounds?.playTone(won ? 1047 : 262, 0.45, 'triangle', 0.14), 180)
+            }
+        }
 
         if(match.state === 'complete')
         {
@@ -1372,13 +1423,74 @@ export default class World
         this._updateTeamClock()
     }
 
+    _findLocalTeamPlayer(state)
+    {
+        if(!state || !this.network?.localId) return null
+        return [...(state.red?.players || []), ...(state.blue?.players || [])]
+            .find(player => player.id === this.network.localId)
+    }
+
+    _renderTeamReadyPanel(state)
+    {
+        const $panel = document.getElementById('team-ready-panel')
+        if(!$panel) return
+        const waiting = state.match?.state === 'waiting'
+        $panel.classList.toggle('visible', waiting)
+        const local = this._findLocalTeamPlayer(state)
+        const isHost = state.hostId === this.network?.localId
+        const $ready = document.getElementById('trp-ready')
+        const $start = document.getElementById('trp-start')
+        const $role = document.getElementById('trp-role')
+        const $message = document.getElementById('trp-message')
+        if($role) $role.textContent = isHost ? '👑 HOST' : 'PLAYER'
+        if($ready)
+        {
+            $ready.textContent = local?.matchReady ? 'NOT READY' : 'READY'
+            $ready.classList.toggle('ready', Boolean(local?.matchReady))
+        }
+        if($start)
+        {
+            $start.classList.toggle('visible', isHost)
+            $start.disabled = !state.canStart
+        }
+        if($message)
+        {
+            const humans = [...(state.red?.players || []), ...(state.blue?.players || [])].filter(player => !player.isBot)
+            const readyCount = humans.filter(player => player.matchReady).length
+            $message.textContent = isHost
+                ? `${readyCount}/${humans.length} players ready. Start unlocks when both teams are represented.`
+                : `${readyCount}/${humans.length} players ready. Waiting for the host to start.`
+        }
+    }
+
+    _showTeamEvent(text, color = '#fff')
+    {
+        const $banner = document.getElementById('team-event-banner')
+        if(!$banner) return
+        $banner.textContent = text
+        $banner.style.color = color
+        $banner.classList.remove('visible')
+        void $banner.offsetWidth
+        $banner.classList.add('visible')
+    }
+
     _updateTeamClock()
     {
         const match = this._teamState?.match
         if(!match) return
         let label = 'WAITING'
         const now = this.network?.serverNow?.() ?? Date.now()
-        if(match.state === 'countdown') label = `${Math.max(1, Math.ceil((match.startsAt - now) / 1000))}`
+        if(match.state === 'countdown')
+        {
+            const second = Math.max(1, Math.ceil((match.startsAt - now) / 1000))
+            label = `${second}`
+            if(second !== this._lastTeamCountdownSecond)
+            {
+                this._lastTeamCountdownSecond = second
+                this.sounds?.playTone(520 + (3 - Math.min(second, 3)) * 90, 0.1, 'square', 0.1)
+                this._showTeamEvent(`${second}`, '#ffffff')
+            }
+        }
         else if(match.state === 'playing')
         {
             const seconds = Math.max(0, Math.ceil((match.endsAt - now) / 1000))

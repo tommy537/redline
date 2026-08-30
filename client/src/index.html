@@ -1091,7 +1091,7 @@
                     <div class="rl-card-label">Mode 03</div>
                     <div class="rl-card-name">TEAM BATTLE</div>
                     <div class="rl-card-desc">Red versus Blue. Enemy kills score for the team. Friendly fire is disabled.</div>
-                    <div class="rl-card-stats"><span>2</span><em>·</em><span>TEAMS</span><em>·</em><span>AUTO-BALANCE</span></div>
+                    <div class="rl-card-stats"><span>3 MIN</span><em>·</em><span>READY LOBBY</span><em>·</em><span>SUDDEN DEATH</span></div>
                     <div class="rl-card-cta">
                         <span>Enter</span>
                         <span class="rl-card-cta-arrow" aria-hidden="true">→</span>
@@ -1513,6 +1513,17 @@
         <div class="ts-clock"><strong id="ts-time">WAITING</strong><span id="ts-status">Waiting for both teams</span></div>
         <div class="ts-side blue"><span id="ts-blue-score">0</span><strong>BLUE</strong></div>
     </div>
+
+    <div id="team-ready-panel" aria-live="polite">
+        <div class="trp-title"><span>TEAM LOBBY</span><span id="trp-role">PLAYER</span></div>
+        <div id="trp-message">Choose Ready when your family is prepared.</div>
+        <div class="trp-actions">
+            <button id="trp-ready" type="button">READY</button>
+            <button id="trp-start" type="button">START MATCH</button>
+        </div>
+    </div>
+
+    <div id="team-event-banner" aria-live="assertive"></div>
 
     <div id="team-match-complete">
         <div class="rc-inner">

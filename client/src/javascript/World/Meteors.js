@@ -17,6 +17,7 @@ export default class Meteors
         this.healthSystem = _options.healthSystem
         this.weapons      = _options.weapons         // for _explodeAt() FX
         this.sounds       = _options.sounds || null
+        this.damageEnabled = _options.damageEnabled || (() => true)
         this.shake        = _options.onShake  || null
 
         this._items = []
@@ -153,7 +154,7 @@ export default class Meteors
         }
 
         // Damage local car if it's inside the impact radius and on the ground
-        if(this.healthSystem?.isDead?.()) return
+        if(this.healthSystem?.isDead?.() || !this.damageEnabled()) return
         if(dist < IMPACT_RADIUS && body.position.z < 4)
         {
             this.healthSystem?.takeDamage(IMPACT_DAMAGE)
