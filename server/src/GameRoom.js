@@ -4,6 +4,13 @@ import { NETWORK, SPAWN_GRID } from '../../shared/constants.js'
 
 const { tickRate, physicsRate, maxPlayers } = NETWORK
 const TEAM_MAX_PLAYERS = 8
+const TEAM_SIZE = 4
+const TEAM_MATCH_MS = 3 * 60 * 1000
+const TEAM_COUNTDOWN_MS = 3000
+const TEAM_SPAWNS = {
+  red:  [{ x: -18, y: -40 }, { x: -6, y: -40 }, { x: 6, y: -40 }, { x: 18, y: -40 }],
+  blue: [{ x: 18, y: 40 }, { x: 6, y: 40 }, { x: -6, y: 40 }, { x: -18, y: 40 }],
+}
 
 export class GameRoom {
   constructor(io) {
@@ -11,6 +18,8 @@ export class GameRoom {
     this.physics = new PhysicsWorld()
     this.players = new Map() // socketId → { id, name, carColor, actions }
     this.teamScores = { red: 0, blue: 0 }
+    this.teamMatch = { state: 'waiting', startsAt: 0, endsAt: 0, winner: null, suddenDeath: false }
+    this._botCounter = 0
 
     this._startLoop()
     this._setupSocketEvents()
@@ -45,16 +54,173 @@ export class GameRoom {
     return redCount <= blueCount ? 'red' : 'blue'
   }
 
+  _teamCount(team) {
+    return this._playersForMode('team-combat').filter(player => player.team === team).length
+  }
+
+  _teamSpawn(team) {
+    const slots = TEAM_SPAWNS[team]
+    const slot = this._teamCount(team) % slots.length
+    return { ...slots[slot], z: 12, _index: slot }
+  }
+
   _getTeamState() {
     const players = this._playersForMode('team-combat')
     const makeRoster = team => players
       .filter(player => player.team === team)
-      .map(({ id, name, kills = 0, deaths = 0 }) => ({ id, name, kills, deaths, team }))
+      .map(({ id, name, kills = 0, deaths = 0, isBot = false, handicap = 'normal', stats = {} }) =>
+        ({ id, name, kills, deaths, team, isBot, handicap, stats }))
+
+    const catchUpTeam = Math.abs(this.teamScores.red - this.teamScores.blue) >= 3
+      ? (this.teamScores.red < this.teamScores.blue ? 'red' : 'blue')
+      : null
 
     return {
       red: { score: this.teamScores.red, players: makeRoster('red') },
       blue: { score: this.teamScores.blue, players: makeRoster('blue') },
+      match: { ...this.teamMatch, serverNow: Date.now() },
+      catchUpTeam,
+      funStats: this._getFunStats(players),
     }
+  }
+
+  _getFunStats(players = this._playersForMode('team-combat')) {
+    const ranked = key => [...players].sort((a, b) => (b.stats?.[key] || 0) - (a.stats?.[key] || 0))[0]
+    const mvp = [...players].sort((a, b) => (b.kills || 0) - (a.kills || 0))[0]
+    return {
+      mvp: mvp ? { name: mvp.name, value: mvp.kills || 0 } : null,
+      sharpShooter: ranked('hits') ? { name: ranked('hits').name, value: ranked('hits').stats?.hits || 0 } : null,
+      bumper: ranked('bumps') ? { name: ranked('bumps').name, value: ranked('bumps').stats?.bumps || 0 } : null,
+    }
+  }
+
+  _maybeStartTeamMatch() {
+    if (this.teamMatch.state !== 'waiting') return
+    if (this._teamCount('red') < 1 || this._teamCount('blue') < 1) return
+    const startsAt = Date.now() + TEAM_COUNTDOWN_MS
+    this.teamMatch = { state: 'countdown', startsAt, endsAt: startsAt + TEAM_MATCH_MS, winner: null, suddenDeath: false }
+    this._broadcastTeamState()
+  }
+
+  _updateTeamMatch(now) {
+    if (this.teamMatch.state === 'countdown' && now >= this.teamMatch.startsAt) {
+      this.teamMatch.state = 'playing'
+      this._broadcastTeamState()
+    }
+    if (this.teamMatch.state === 'playing' && now >= this.teamMatch.endsAt) {
+      if (this.teamScores.red === this.teamScores.blue) {
+        this.teamMatch.state = 'sudden-death'
+        this.teamMatch.suddenDeath = true
+      } else {
+        this._finishTeamMatch(this.teamScores.red > this.teamScores.blue ? 'red' : 'blue')
+      }
+      this._broadcastTeamState()
+    }
+  }
+
+  _finishTeamMatch(winner) {
+    this.teamMatch.state = 'complete'
+    this.teamMatch.winner = winner
+    this.teamMatch.suddenDeath = false
+  }
+
+  _resetTeamMatch() {
+    this.teamScores = { red: 0, blue: 0 }
+    for (const player of this._playersForMode('team-combat')) {
+      player.kills = 0
+      player.deaths = 0
+      player.stats = { shots: 0, hits: 0, damage: 0, bumps: 0 }
+    }
+    this.teamMatch = { state: 'waiting', startsAt: 0, endsAt: 0, winner: null, suddenDeath: false }
+    this._broadcastCombatLeaderboard('team-combat')
+    this._maybeStartTeamMatch()
+    this._broadcastTeamState()
+  }
+
+  _addBot(team) {
+    if (this._teamCount(team) >= TEAM_SIZE) return
+    const id = `bot-${++this._botCounter}`
+    const spawnPos = this._teamSpawn(team)
+    this.physics.addCar(id, spawnPos)
+    const player = {
+      id, name: `BOT ${team.toUpperCase()} ${this._teamCount(team) + 1}`, carColor: team === 'red' ? 0 : 1,
+      carType: 'default', gameMode: 'team-combat', team, isBot: true, handicap: 'normal', hp: 100,
+      actions: { up: true, down: false, left: false, right: false, brake: false, boost: false, steer: 0, throttle: 0.75 },
+      spawnXY: { x: spawnPos.x, y: spawnPos.y }, kills: 0, deaths: 0, stats: { shots: 0, hits: 0, damage: 0, bumps: 0 },
+      lastDamagedBy: null, lastDamagedAt: 0, lastDeathAt: 0,
+      nextShotAt: Date.now() + 1800 + Math.random() * 1200,
+    }
+    this.players.set(id, player)
+    this.io.to('team-combat').emit('player:joined', { id, name: player.name, carColor: player.carColor, carType: 'default', team, isBot: true })
+  }
+
+  _fillFamilyBots() {
+    while (this._teamCount('red') < 2) this._addBot('red')
+    while (this._teamCount('blue') < 2) this._addBot('blue')
+  }
+
+  _updateBots(now) {
+    if (!['playing', 'sudden-death'].includes(this.teamMatch.state)) return
+    for (const bot of this._playersForMode('team-combat').filter(player => player.isBot)) {
+      if (now < bot.nextShotAt) continue
+      bot.nextShotAt = now + 1800 + Math.random() * 900
+      const enemies = this._playersForMode('team-combat').filter(player => player.team !== bot.team && !player.isBot)
+      const target = enemies[Math.floor(Math.random() * enemies.length)]
+      const targetSocket = target && this.io.sockets.sockets.get(target.id)
+      const botCar = this.physics.cars.get(bot.id)
+      const targetCar = target && this.physics.cars.get(target.id)
+      if (!target || !targetSocket || !botCar || !targetCar) continue
+      const from = botCar.chassis.position
+      const to = targetCar.chassis.position
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+      const distance = Math.hypot(dx, dy)
+      if (distance > 48 || distance < 1) continue
+      bot.stats.shots += 1
+      bot.stats.hits += 1
+      const handicapScale = target.handicap === 'easy' ? 0.75 : target.handicap === 'pro' ? 1.1 : 1
+      const catchUp = Math.abs(this.teamScores.red - this.teamScores.blue) >= 3 && this.teamScores[bot.team] < this.teamScores[target.team]
+      const amount = Math.round(12 * handicapScale * (catchUp ? 1.2 : 1) * 10) / 10
+      bot.stats.damage += amount
+      target.lastDamagedBy = bot.id
+      target.lastDamagedAt = now
+      this.io.to('team-combat').emit('combat:missile', {
+        fromId: bot.id, x: from.x, y: from.y, z: from.z + 0.8, dx: dx / distance, dy: dy / distance,
+      })
+      targetSocket.emit('player:combatDamage', { fromId: bot.id, amount })
+    }
+  }
+
+  _scoreTeamKill(killer) {
+    this.teamScores[killer.team] += 1
+    if (this.teamMatch.state === 'sudden-death') this._finishTeamMatch(killer.team)
+  }
+
+  _damageBot(bot, attacker, amount) {
+    if (!['playing', 'sudden-death'].includes(this.teamMatch.state)) return
+    bot.hp -= amount
+    if (bot.hp > 0 || Date.now() - bot.lastDeathAt < 2500) return
+    bot.lastDeathAt = Date.now()
+    bot.deaths += 1
+    attacker.kills += 1
+    this._scoreTeamKill(attacker)
+    const car = this.physics.cars.get(bot.id)
+    const p = car?.chassis?.position || { x: bot.spawnXY.x, y: bot.spawnXY.y, z: 0 }
+    this.io.to('team-combat').emit('combat:carDestroyed', { fromId: bot.id, x: p.x, y: p.y, z: p.z, color: bot.carColor })
+    this.io.to('team-combat').emit('combat:kill', {
+      killerId: attacker.id, killerName: attacker.name, killerTeam: attacker.team,
+      victimId: bot.id, victimName: bot.name, victimTeam: bot.team, kills: attacker.kills,
+    })
+    setTimeout(() => {
+      bot.hp = 100
+      const botCar = this.physics.cars.get(bot.id)
+      if (botCar) {
+        botCar.chassis.position.set(bot.spawnXY.x, bot.spawnXY.y, 3)
+        botCar.chassis.velocity.set(0, 0, 0)
+      }
+    }, 3000)
+    this._broadcastCombatLeaderboard('team-combat')
+    this._broadcastTeamState()
   }
 
   _broadcastTeamState() {
@@ -96,7 +262,7 @@ export class GameRoom {
         if(typeof cb === 'function') cb(Date.now())
       })
 
-      socket.on('player:join', ({ name, carColor, carType, gameMode: requestedMode }) => {
+      socket.on('player:join', ({ name, carColor, carType, gameMode: requestedMode, preferredTeam, handicap, fillBots }) => {
         if (this.players.has(socket.id)) return
 
         const gameMode = ['race', 'combat', 'team-combat'].includes(requestedMode)
@@ -109,8 +275,13 @@ export class GameRoom {
           return
         }
 
-        const team = gameMode === 'team-combat' ? this._assignTeam() : null
-        const spawnPos = this._getSpawnPosition(gameMode)
+        const requestedTeam = preferredTeam === 'blue' ? 'blue' : 'red'
+        if (gameMode === 'team-combat' && this._teamCount(requestedTeam) >= TEAM_SIZE) {
+          socket.emit('team:full', { team: requestedTeam })
+          return
+        }
+        const team = gameMode === 'team-combat' ? requestedTeam : null
+        const spawnPos = team ? this._teamSpawn(team) : this._getSpawnPosition(gameMode)
         socket.join(gameMode)
         this.physics.addCar(socket.id, spawnPos)
 
@@ -121,6 +292,10 @@ export class GameRoom {
           carType:  carType || 'default',
           gameMode,
           team,
+          handicap: ['easy', 'normal', 'pro'].includes(handicap) ? handicap : 'normal',
+          isBot: false,
+          hp: 100,
+          stats: { shots: 0, hits: 0, damage: 0, bumps: 0 },
           actions:  { up: false, down: false, left: false, right: false, brake: false, boost: false, steer: 0, throttle: 0 },
           spawnXY:  { x: spawnPos.x, y: spawnPos.y },
           kills:    0,
@@ -133,13 +308,13 @@ export class GameRoom {
         // Send existing players to new joiner
         const existingPlayers = [...this.players.values()]
           .filter(p => p.id !== socket.id && p.gameMode === gameMode)
-          .map(({ id, name, carColor, carType, team }) => ({ id, name, carColor, carType, team }))
+          .map(({ id, name, carColor, carType, team, isBot }) => ({ id, name, carColor, carType, team, isBot }))
 
         // Include spawn position so client can initialise the local car at the same spot
         socket.emit('room:joined', {
           id: socket.id,
           existingPlayers,
-          spawnPos: { x: spawnPos.x, y: spawnPos.y },
+          spawnPos: { x: spawnPos.x, y: spawnPos.y, _index: spawnPos._index },
           gameMode,
           team,
           teamState: gameMode === 'team-combat' ? this._getTeamState() : null,
@@ -152,10 +327,15 @@ export class GameRoom {
           carColor: carColor ?? 0,
           carType:  carType || 'default',
           team,
+          isBot: false,
         })
 
         this._broadcastCombatLeaderboard(gameMode)
-        if (gameMode === 'team-combat') this._broadcastTeamState()
+        if (gameMode === 'team-combat') {
+          if (fillBots) this._fillFamilyBots()
+          this._maybeStartTeamMatch()
+          this._broadcastTeamState()
+        }
 
         console.log(`[join] ${name} (${socket.id}) — ${gameMode}${team ? `/${team}` : ''}`)
       })
@@ -184,6 +364,7 @@ export class GameRoom {
         const targetSocket = this.io.sockets.sockets.get(targetId)
         const source = this.players.get(socket.id)
         const target = this.players.get(targetId)
+        if (source?.stats) source.stats.bumps += 1
         if (targetSocket && source && target && source.gameMode === target.gameMode) {
           targetSocket.emit('player:bumped', { fromId: socket.id, fromPos })
         }
@@ -205,6 +386,7 @@ export class GameRoom {
       socket.on('combat:missile', (data) => {
         const player = this.players.get(socket.id)
         if (!player) return
+        if (player.stats) player.stats.shots += 1
         console.log(`[combat] missile from ${socket.id}`, data)
         socket.to(player.gameMode).emit('combat:missile', { fromId: socket.id, ...data })
       })
@@ -216,11 +398,22 @@ export class GameRoom {
         const target = this.players.get(targetId)
         const sameMode = attacker && target && attacker.gameMode === target.gameMode
         const friendlyFire = sameMode && attacker.gameMode === 'team-combat' && attacker.team === target.team
-        const validAmount = Number.isFinite(amount) && amount > 0 ? Math.min(amount, 100) : 0
-        if (targetSocket && sameMode && !friendlyFire && targetId !== socket.id && validAmount > 0) {
+        const rawAmount = Number.isFinite(amount) && amount > 0 ? Math.min(amount, 100) : 0
+        const handicapScale = target?.handicap === 'easy' ? 0.75 : target?.handicap === 'pro' ? 1.1 : 1
+        const catchUpTeam = Math.abs(this.teamScores.red - this.teamScores.blue) >= 3
+          ? (this.teamScores.red < this.teamScores.blue ? 'red' : 'blue') : null
+        const catchUpScale = attacker?.team && attacker.team === catchUpTeam ? 1.2 : 1
+        const validAmount = Math.round(rawAmount * handicapScale * catchUpScale * 10) / 10
+        const matchActive = attacker?.gameMode !== 'team-combat' || ['playing', 'sudden-death'].includes(this.teamMatch.state)
+        if (sameMode && !friendlyFire && targetId !== socket.id && validAmount > 0 && matchActive) {
           target.lastDamagedBy = socket.id
           target.lastDamagedAt = Date.now()
-          targetSocket.emit('player:combatDamage', { fromId: socket.id, amount: validAmount })
+          if (attacker.stats) {
+            attacker.stats.hits += 1
+            attacker.stats.damage += validAmount
+          }
+          if (targetSocket) targetSocket.emit('player:combatDamage', { fromId: socket.id, amount: validAmount })
+          else if (target.isBot) this._damageBot(target, attacker, validAmount)
         }
       })
 
@@ -244,11 +437,10 @@ export class GameRoom {
         victim.deaths += 1
 
         const killer = this.players.get(victim.lastDamagedBy)
-        if (killer && killer.id !== victim.id && killer.gameMode === victim.gameMode && now - victim.lastDamagedAt <= 2000) {
+        const scoringOpen = victim.gameMode !== 'team-combat' || ['playing', 'sudden-death'].includes(this.teamMatch.state)
+        if (scoringOpen && killer && killer.id !== victim.id && killer.gameMode === victim.gameMode && now - victim.lastDamagedAt <= 2000) {
           killer.kills += 1
-          if (victim.gameMode === 'team-combat' && killer.team && killer.team !== victim.team) {
-            this.teamScores[killer.team] += 1
-          }
+          if (victim.gameMode === 'team-combat' && killer.team && killer.team !== victim.team) this._scoreTeamKill(killer)
           this.io.to(victim.gameMode).emit('combat:kill', {
             killerId: killer.id,
             killerName: killer.name,
@@ -274,6 +466,11 @@ export class GameRoom {
         if (player) player.clientSnapshot = state
       })
 
+      socket.on('team:rematch', () => {
+        const player = this.players.get(socket.id)
+        if (player?.gameMode === 'team-combat' && this.teamMatch.state === 'complete') this._resetTeamMatch()
+      })
+
       socket.on('disconnect', () => {
         this.physics.removeCar(socket.id)
         const player = this.players.get(socket.id)
@@ -282,9 +479,15 @@ export class GameRoom {
           this.io.to(player.gameMode).emit('player:left', { id: socket.id })
           this._broadcastCombatLeaderboard(player.gameMode)
           if (player.gameMode === 'team-combat') {
-            if (this._playersForMode('team-combat').length === 0) {
+            const humans = this._playersForMode('team-combat').filter(p => !p.isBot)
+            if (humans.length === 0) {
+              for (const bot of this._playersForMode('team-combat').filter(p => p.isBot)) {
+                this.physics.removeCar(bot.id)
+                this.players.delete(bot.id)
+              }
               this.teamScores.red = 0
               this.teamScores.blue = 0
+              this.teamMatch = { state: 'waiting', startsAt: 0, endsAt: 0, winner: null, suddenDeath: false }
             }
             this._broadcastTeamState()
           }
@@ -304,9 +507,15 @@ export class GameRoom {
       const now   = Date.now()
       const delta = (now - last) / 1000
       last = now
+      this._updateTeamMatch(now)
+      this._updateBots(now)
 
       // Apply inputs
       for (const [id, player] of this.players) {
+        if (player.isBot) {
+          player.actions.steer = Math.sin(now / 1800 + this._botCounter) * 0.65
+          player.actions.throttle = 0.7
+        }
         this.physics.applyInputs(id, player.actions)
       }
 
@@ -320,9 +529,10 @@ export class GameRoom {
         broadcastAccum -= broadcastInterval
         const carsByMode = new Map()
         for (const [id, player] of this.players) {
-          if (player.clientSnapshot) {
+          const state = player.clientSnapshot || (player.isBot ? this.physics.cars.get(id)?.getState() : null)
+          if (state) {
             if (!carsByMode.has(player.gameMode)) carsByMode.set(player.gameMode, [])
-            carsByMode.get(player.gameMode).push({ id, ...player.clientSnapshot })
+            carsByMode.get(player.gameMode).push({ id, ...state })
           }
         }
         for (const [gameMode, cars] of carsByMode) {

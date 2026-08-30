@@ -1201,6 +1201,35 @@
 
 #team-roster.visible { display: block; }
 
+.team-choice-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.team-choice { min-height:88px; border:2px solid #333; border-radius:10px; background:#181818; color:#fff; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; font:700 14px monospace; }
+.team-choice span { font-size:11px; opacity:.55; }
+.team-choice.red.selected { border-color:#ff3655; box-shadow:0 0 22px rgba(255,54,85,.2); }
+.team-choice.blue.selected { border-color:#3f8cff; box-shadow:0 0 22px rgba(63,140,255,.2); }
+.family-setting { display:flex; flex-direction:column; gap:7px; margin-top:18px; color:#777; font:700 10px monospace; letter-spacing:1px; }
+.family-setting select { background:#1a1a1a; color:#fff; border:1px solid #333; border-radius:8px; padding:10px; }
+.family-check { display:flex; align-items:center; gap:8px; margin-top:14px; color:#aaa; font:12px monospace; }
+
+#team-scoreboard { display:none; position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:560; min-width:360px; height:58px; padding:7px 16px; grid-template-columns:1fr 1.2fr 1fr; align-items:center; gap:12px; color:#fff; background:rgba(5,5,9,.82); border:1px solid rgba(255,255,255,.12); border-radius:10px; backdrop-filter:blur(10px); font-family:monospace; }
+#team-scoreboard.visible { display:grid; }
+.ts-side { display:flex; align-items:center; gap:10px; font-size:13px; }
+.ts-side span { font-size:27px; font-weight:900; }
+.ts-side.blue { justify-content:flex-end; color:#62a5ff; }
+.ts-side.red { color:#ff4963; }
+.ts-clock { text-align:center; display:flex; flex-direction:column; }
+.ts-clock strong { font-size:20px; letter-spacing:2px; }
+.ts-clock span { color:#888; font-size:8px; text-transform:uppercase; letter-spacing:1px; }
+#team-match-complete { position:fixed; inset:0; z-index:950; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.82); opacity:0; pointer-events:none; transition:opacity .35s; color:#fff; font-family:monospace; }
+#team-match-complete.visible { opacity:1; pointer-events:auto; }
+#tm-stats { margin:20px 0; color:#bbb; line-height:1.8; text-align:left; }
+#tm-rematch { border:0; border-radius:8px; background:#fff; color:#000; padding:12px 28px; font:700 14px monospace; cursor:pointer; }
+
+@media (max-width: 600px) {
+    #team-scoreboard { top:8px; min-width:0; width:calc(100vw - 24px); padding:6px 10px; }
+    .ts-side span { font-size:22px; }
+    .ts-clock strong { font-size:16px; }
+}
+
 .tr-title {
     color: var(--rl-text-dim);
     font-size: 9px;

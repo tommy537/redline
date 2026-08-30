@@ -1168,6 +1168,7 @@
                 <div class="lobby-dot active" id="dot-0"></div>
                 <div class="lobby-dot" id="dot-1"></div>
                 <div class="lobby-dot" id="dot-2"></div>
+                <div class="lobby-dot team-only" id="dot-3" style="display:none"></div>
             </div>
 
             <!-- Step 1: Name -->
@@ -1218,6 +1219,26 @@
                 <div class="lobby-buttons">
                     <button class="lobby-btn secondary" id="btn-car-back">← Back</button>
                     <button class="lobby-btn" id="btn-play">Play 🏁</button>
+                </div>
+            </div>
+
+            <!-- Step 4: Team Battle setup (required for Mode 03) -->
+            <div class="step" id="step-3">
+                <div class="team-choice-grid">
+                    <button class="team-choice red selected" data-team="red" type="button"><b>🔴 RED</b><span id="team-red-count">0 / 4</span></button>
+                    <button class="team-choice blue" data-team="blue" type="button"><b>🔵 BLUE</b><span id="team-blue-count">0 / 4</span></button>
+                </div>
+                <label class="family-setting">HANDICAP
+                    <select id="team-handicap">
+                        <option value="easy">Easy · take 25% less damage</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="pro">Pro · take 10% more damage</option>
+                    </select>
+                </label>
+                <label class="family-check"><input id="team-fill-bots" type="checkbox" checked> Fill to 2 vs 2 with family bots</label>
+                <div class="lobby-buttons">
+                    <button class="lobby-btn secondary" id="btn-team-back">← Back</button>
+                    <button class="lobby-btn" id="btn-team-start">Start Team Battle ⚔️</button>
                 </div>
             </div>
         </div>
@@ -1483,6 +1504,23 @@
                 <div class="tr-team-name">BLUE</div>
                 <ul id="tr-blue-list"></ul>
             </div>
+        </div>
+    </div>
+
+    <!-- Persistent Team Battle score / match clock -->
+    <div id="team-scoreboard" aria-live="polite">
+        <div class="ts-side red"><strong>RED</strong><span id="ts-red-score">0</span></div>
+        <div class="ts-clock"><strong id="ts-time">WAITING</strong><span id="ts-status">Waiting for both teams</span></div>
+        <div class="ts-side blue"><span id="ts-blue-score">0</span><strong>BLUE</strong></div>
+    </div>
+
+    <div id="team-match-complete">
+        <div class="rc-inner">
+            <div class="rc-trophy">🏆</div>
+            <div class="rc-title" id="tm-title">TEAM RED WINS</div>
+            <div class="rc-sub" id="tm-score">0 — 0</div>
+            <div id="tm-stats"></div>
+            <button id="tm-rematch">Rematch</button>
         </div>
     </div>
 

@@ -334,9 +334,10 @@ export default class World
         })
         this.container.add(this.arena.container)
 
-        // Use arena spawn grid for combat; spreads players around the south side
-        const slot = (this._serverSpawnPos?._index ?? 0) % ARENA_SPAWN_GRID.length
-        this._serverSpawnPos = ARENA_SPAWN_GRID[slot]
+        // Server owns Team spawns (Red south / Blue north). Keep the legacy
+        // south grid only as an offline/old-server fallback.
+        if(!this._serverSpawnPos)
+            this._serverSpawnPos = ARENA_SPAWN_GRID[0]
     }
 
     setLapTimer()
@@ -540,7 +541,10 @@ export default class World
         const $you = document.getElementById('mp-you')
         if(!$you) return
 
-        $you.textContent   = this.network?.localPlayerName || this.config.playerName || 'YOU'
+        const localTeam = this.network?.localTeam
+        const teamIcon = localTeam === 'red' ? '🔴' : localTeam === 'blue' ? '🔵' : ''
+        $you.textContent   = `${teamIcon} ${this.network?.localPlayerName || this.config.playerName || 'YOU'}`.trim()
+        if(localTeam) $you.style.border = `1px solid ${localTeam === 'red' ? '#ff4963' : '#62a5ff'}`
         $you.style.display = 'block'
 
         this.time.on('tick', () =>
@@ -869,6 +873,8 @@ export default class World
             localCarColor:    this.config.carColor ?? 0,
             pickups:          ARENA_PICKUPS,
             hazards:          this.hazardZones.getMinimapZones(),
+            teamMode:         this.config.gameMode === 'team-combat',
+            localTeam:        this.network?.localTeam,
         })
 
         // ── Meteor shower — server-driven so all clients see the same impacts ──
@@ -1305,15 +1311,83 @@ export default class World
                     const enemyScore = state[enemyTeam]?.score ?? 0
                     this._updateKillCounter(`${ownScore}-${enemyScore}`, 0)
                     if($kcTarget) $kcTarget.textContent = localTeam.toUpperCase()
+                    this._renderTeamMatch(state)
                 }
 
                 this.network.on('team:state', applyTeamScore)
                 if(this.network.teamState) applyTeamScore(this.network.teamState)
+                document.getElementById('team-scoreboard')?.classList.add('visible')
+                document.getElementById('tm-rematch')?.addEventListener('click', () =>
+                {
+                    document.getElementById('team-match-complete')?.classList.remove('visible')
+                    this.network.requestTeamRematch()
+                })
+                this.time.on('tick', () => this._updateTeamClock())
             }
 
             if(this.network.combatLeaderboard)
                 applyLeaderboard(this.network.combatLeaderboard)
         }
+    }
+
+    _renderTeamMatch(state)
+    {
+        this._teamState = state
+        const setText = (id, value) => { const el = document.getElementById(id); if(el) el.textContent = value }
+        setText('ts-red-score', state.red?.score ?? 0)
+        setText('ts-blue-score', state.blue?.score ?? 0)
+
+        const match = state.match || { state: 'waiting' }
+        const status = match.state === 'waiting' ? 'Waiting for both teams'
+            : match.state === 'countdown' ? 'Get ready'
+            : match.state === 'sudden-death' ? 'Next kill wins'
+            : state.catchUpTeam ? `${state.catchUpTeam.toUpperCase()} catch-up +20% damage`
+            : 'Team Battle · 3 minutes'
+        setText('ts-status', status)
+
+        if(match.state === 'complete')
+        {
+            setText('tm-title', `TEAM ${match.winner?.toUpperCase()} WINS`)
+            setText('tm-score', `${state.red?.score ?? 0} — ${state.blue?.score ?? 0}`)
+            const stats = state.funStats || {}
+            const rows = [
+                stats.mvp && `🏆 MVP: ${stats.mvp.name} (${stats.mvp.value} kills)`,
+                stats.sharpShooter && `🎯 Sharp shooter: ${stats.sharpShooter.name} (${stats.sharpShooter.value} hits)`,
+                stats.bumper && `🚗 Bumper: ${stats.bumper.name} (${stats.bumper.value} bumps)`,
+            ].filter(Boolean)
+            const $stats = document.getElementById('tm-stats')
+            if($stats)
+            {
+                $stats.innerHTML = ''
+                rows.forEach(row =>
+                {
+                    const $row = document.createElement('div')
+                    $row.textContent = row
+                    $stats.appendChild($row)
+                })
+            }
+            document.getElementById('team-match-complete')?.classList.add('visible')
+        }
+        else document.getElementById('team-match-complete')?.classList.remove('visible')
+        this._updateTeamClock()
+    }
+
+    _updateTeamClock()
+    {
+        const match = this._teamState?.match
+        if(!match) return
+        let label = 'WAITING'
+        const now = this.network?.serverNow?.() ?? Date.now()
+        if(match.state === 'countdown') label = `${Math.max(1, Math.ceil((match.startsAt - now) / 1000))}`
+        else if(match.state === 'playing')
+        {
+            const seconds = Math.max(0, Math.ceil((match.endsAt - now) / 1000))
+            label = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+        }
+        else if(match.state === 'sudden-death') label = 'SUDDEN DEATH'
+        else if(match.state === 'complete') label = 'FINAL'
+        const $time = document.getElementById('ts-time')
+        if($time) $time.textContent = label
     }
 
     _renderCombatLeaderboard(players)

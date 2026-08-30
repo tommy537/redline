@@ -38,7 +38,7 @@ export default class RemoteCarManager
                 // Flush any players that joined before models were loaded
                 for(const p of this._pending)
                 {
-                    this._createCar(p.id, p.name, p.carColor, p.carType)
+                    this._createCar(p.id, p.name, p.carColor, p.carType, p.team, p.isBot)
                 }
                 this._pending = []
             })
@@ -109,10 +109,10 @@ export default class RemoteCarManager
     _setupNetworkEvents()
     {
         // New player joins — create their car
-        this.network.on('player:joined', ({ id, name, carColor, carType }) =>
+        this.network.on('player:joined', ({ id, name, carColor, carType, team, isBot }) =>
         {
             console.log(`[RemoteCarManager] player:joined → name="${name}" id="${id}" carType="${carType}"`)
-            this._addCar(id, name, carColor, carType)
+            this._addCar(id, name, carColor, carType, team, isBot)
         })
 
         // Player leaves — destroy their car
@@ -153,13 +153,13 @@ export default class RemoteCarManager
             console.log(`[RemoteCarManager] room:joined → existingPlayers:`, existingPlayers)
             for(const player of existingPlayers)
             {
-                this._addCar(player.id, player.name, player.carColor, player.carType)
+                this._addCar(player.id, player.name, player.carColor, player.carType, player.team, player.isBot)
             }
         })
     }
 
     // Public: queue or immediately create
-    _addCar(id, name, carColor, carType = 'default')
+    _addCar(id, name, carColor, carType = 'default', team = null, isBot = false)
     {
         if(this.cars.has(id)) return
         // Avoid duplicate pending entries
@@ -167,18 +167,18 @@ export default class RemoteCarManager
 
         if(this._ready)
         {
-            this._createCar(id, name, carColor, carType)
+            this._createCar(id, name, carColor, carType, team, isBot)
         }
         else
         {
             // Resources not loaded yet — queue for later
-            this._pending.push({ id, name, carColor, carType })
+            this._pending.push({ id, name, carColor, carType, team, isBot })
             console.log(`[remote] queued ${name} until resources ready`)
         }
     }
 
     // Internal: actually create the Three.js car
-    _createCar(id, name, carColor, carType = 'default')
+    _createCar(id, name, carColor, carType = 'default', team = null, isBot = false)
     {
         if(this.cars.has(id)) return
 
@@ -193,6 +193,8 @@ export default class RemoteCarManager
             name,
             carColor,
             carType,
+            team,
+            isBot,
             getPhysicsWorld: this.getPhysicsWorld,
         })
 

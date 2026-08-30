@@ -54,6 +54,7 @@ export default class Network extends EventEmitter
         {
             console.log('[network] room:joined — my id=', id, 'existing=', existingPlayers, 'spawnPos=', spawnPos)
             this.localId  = id
+            this._wasJoined = true
             this.spawnPos = spawnPos   // { x, y } — used by World to position local car
             this.gameMode = gameMode
             this.localTeam = team
@@ -65,6 +66,8 @@ export default class Network extends EventEmitter
         {
             this.trigger('room:full')
         })
+
+        this.socket.on('team:full', (data) => this.trigger('team:full', [data]))
 
         this.socket.on('player:joined', (data) =>
         {
@@ -172,11 +175,10 @@ export default class Network extends EventEmitter
         }, 1500)
     }
 
-    join(name, carColor, carType = 'default', gameMode = 'combat')
+    join(name, carColor, carType = 'default', gameMode = 'combat', teamOptions = {})
     {
         this.localPlayerName = name
-        this._wasJoined        = true
-        this._lastJoinPayload  = { name, carColor, carType, gameMode }
+        this._lastJoinPayload  = { name, carColor, carType, gameMode, ...teamOptions }
         this.socket.emit('player:join', this._lastJoinPayload)
     }
 
@@ -228,6 +230,11 @@ export default class Network extends EventEmitter
         // Called when the local car wakes up (reveal.go setTimeout fires)
         // Server resets its car to the same spawn position so both fall simultaneously
         this.socket.emit('player:ready')
+    }
+
+    requestTeamRematch()
+    {
+        this.socket.emit('team:rematch')
     }
 
     disconnect()
