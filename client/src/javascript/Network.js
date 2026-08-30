@@ -12,6 +12,7 @@ export default class Network extends EventEmitter
         this.latency  = 0
         this.serverTimeOffset = 0     // serverTime ≈ Date.now() + offset
         this._pingInterval = null
+        this.combatLeaderboard = null
     }
 
     // Returns the current server clock estimate (used for interpolation
@@ -113,6 +114,17 @@ export default class Network extends EventEmitter
         {
             console.log('[net] ← combat:carDestroyed received', data)
             this.trigger('combat:carDestroyed', [data])
+        })
+
+        this.socket.on('combat:kill', (data) =>
+        {
+            this.trigger('combat:kill', [data])
+        })
+
+        this.socket.on('combat:leaderboard', (data) =>
+        {
+            this.combatLeaderboard = data
+            this.trigger('combat:leaderboard', [data])
         })
 
         this.socket.on('combat:meteor', (data) =>

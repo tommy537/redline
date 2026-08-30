@@ -1137,6 +1137,42 @@
     color: var(--rl-text-dim);
 }
 
+/* ── Combat: live multiplayer kill leaderboard ─────────────────────────── */
+#leaderboard.combat {
+    min-width: 220px;
+    border-color: rgba(255, 46, 77, 0.22);
+}
+
+#leaderboard.combat #lb-list li {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 5px;
+}
+
+#leaderboard.combat #lb-list li.lb-local {
+    background: rgba(255, 46, 77, 0.13);
+}
+
+#leaderboard.combat .lb-name {
+    min-width: 0;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.78);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#leaderboard.combat .lb-kills {
+    min-width: 30px;
+    text-align: right;
+}
+
+#leaderboard.combat .lb-best .lb-name,
+#leaderboard.combat .lb-best .lb-kills {
+    color: #f1c40f;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    RESPONSIVE — Entry flow (title / menu / onboarding / loading)
    ───────────────────────────────────────────────────────────────────────── */

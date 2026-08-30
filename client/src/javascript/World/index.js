@@ -723,9 +723,6 @@ export default class World
             onHitCar: (id, dmg) =>
             {
                 if(this.network) this.network.sendCombatDamage(id, dmg)
-                // Track damage so _setupCombatEnd can attribute kills
-                if(!this._recentDamage) this._recentDamage = new Map()
-                this._recentDamage.set(id, Date.now())
             },
             onFire: () =>
             {
@@ -1261,31 +1258,72 @@ export default class World
         if($kc) $kc.classList.add('visible')
         this._updateKillCounter(0, TARGET_KILLS)
 
-        // Heuristic: if a car was destroyed within 1500ms of us hitting it,
-        // attribute the kill to us. Server-side tracking would be more accurate
-        // but this is a solid signal for the common case.
+        const $leaderboard = document.getElementById('leaderboard')
+        const $leaderboardTitle = document.getElementById('lb-title')
+        if($leaderboard)
+        {
+            $leaderboard.classList.add('visible', 'combat')
+        }
+        if($leaderboardTitle) $leaderboardTitle.textContent = 'KILL LEADERS'
+
         if(this.network)
         {
-            this.network.on('combat:carDestroyed', ({ fromId }) =>
+            const applyLeaderboard = ({ players = [] }) =>
             {
-                if(this._combatOver) return
-                if(!this._recentDamage) return
-                const stamp = this._recentDamage.get(fromId)
-                if(!stamp) return
-                if(Date.now() - stamp > 1500) return
+                this._renderCombatLeaderboard(players)
 
-                this._recentDamage.delete(fromId)
-                this._kills++
+                const localPlayer = players.find(player => player.id === this.network.localId)
+                this._kills = localPlayer?.kills ?? 0
                 this._updateKillCounter(this._kills, TARGET_KILLS)
-                this._showCombatPickup?.(`+1 KILL`, '#FF2E4D')
 
-                if(this._kills >= TARGET_KILLS)
+                if(!this._combatOver && this._kills >= TARGET_KILLS)
                 {
                     this._combatOver = true
                     setTimeout(() => this._showCombatComplete(this._kills), 1000)
                 }
+            }
+
+            this.network.on('combat:leaderboard', applyLeaderboard)
+            this.network.on('combat:kill', ({ killerId }) =>
+            {
+                if(killerId === this.network.localId)
+                    this._showCombatPickup?.('+1 KILL', '#FF2E4D')
             })
+
+            if(this.network.combatLeaderboard)
+                applyLeaderboard(this.network.combatLeaderboard)
         }
+    }
+
+    _renderCombatLeaderboard(players)
+    {
+        const $list = document.getElementById('lb-list')
+        if(!$list) return
+
+        $list.innerHTML = ''
+        players.slice(0, 8).forEach((player, index) =>
+        {
+            const $row = document.createElement('li')
+            if(index === 0 && player.kills > 0) $row.classList.add('lb-best')
+            if(player.id === this.network?.localId) $row.classList.add('lb-local')
+
+            const $rank = document.createElement('span')
+            $rank.className = 'lb-rank'
+            $rank.textContent = `#${index + 1}`
+
+            const $name = document.createElement('span')
+            $name.className = 'lb-name'
+            $name.textContent = player.id === this.network?.localId ? `${player.name} (YOU)` : player.name
+
+            const $kills = document.createElement('span')
+            $kills.className = 'lb-time lb-kills'
+            $kills.textContent = `${player.kills} K`
+
+            $row.appendChild($rank)
+            $row.appendChild($name)
+            $row.appendChild($kills)
+            $list.appendChild($row)
+        })
     }
 
     _updateKillCounter(kills, target)

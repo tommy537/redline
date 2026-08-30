@@ -15,6 +15,22 @@ export class GameRoom {
     this._startMeteorShower()
   }
 
+  _getCombatLeaderboard() {
+    return [...this.players.values()]
+      .map(({ id, name, kills = 0, deaths = 0 }) => ({ id, name, kills, deaths }))
+      .sort((a, b) =>
+        b.kills - a.kills ||
+        a.deaths - b.deaths ||
+        a.name.localeCompare(b.name)
+      )
+  }
+
+  _broadcastCombatLeaderboard() {
+    this.io.emit('combat:leaderboard', {
+      players: this._getCombatLeaderboard(),
+    })
+  }
+
   // Server-driven meteor shower so all players see the same impacts.
   // Skips emit when nobody is connected to save bandwidth.
   _startMeteorShower() {
@@ -62,6 +78,11 @@ export class GameRoom {
           carType:  carType || 'default',
           actions:  { up: false, down: false, left: false, right: false, brake: false, boost: false, steer: 0, throttle: 0 },
           spawnXY:  { x: spawnPos.x, y: spawnPos.y },
+          kills:    0,
+          deaths:   0,
+          lastDamagedBy: null,
+          lastDamagedAt: 0,
+          lastDeathAt: 0,
         })
 
         // Send existing players to new joiner
@@ -79,6 +100,8 @@ export class GameRoom {
           carColor: carColor ?? 0,
           carType:  carType || 'default',
         })
+
+        this._broadcastCombatLeaderboard()
 
         console.log(`[join] ${name} (${socket.id}) — ${this.players.size} online`)
       })
@@ -131,7 +154,11 @@ export class GameRoom {
       socket.on('player:combatDamage', ({ targetId, amount }) => {
         console.log(`[combat] damage from ${socket.id} → ${targetId} (${amount}hp)`)
         const targetSocket = this.io.sockets.sockets.get(targetId)
-        if (targetSocket) {
+        const attacker = this.players.get(socket.id)
+        const target = this.players.get(targetId)
+        if (targetSocket && attacker && target && targetId !== socket.id) {
+          target.lastDamagedBy = socket.id
+          target.lastDamagedAt = Date.now()
           targetSocket.emit('player:combatDamage', { fromId: socket.id, amount })
         } else {
           console.warn(`[combat] target socket ${targetId} not found`)
@@ -146,6 +173,29 @@ export class GameRoom {
       socket.on('combat:carDestroyed', (data) => {
         console.log(`[combat] car destroyed: ${socket.id}`)
         socket.broadcast.emit('combat:carDestroyed', { fromId: socket.id, ...data })
+
+        const victim = this.players.get(socket.id)
+        const now = Date.now()
+        if (!victim || now - victim.lastDeathAt < 2500) return
+
+        victim.lastDeathAt = now
+        victim.deaths += 1
+
+        const killer = this.players.get(victim.lastDamagedBy)
+        if (killer && killer.id !== victim.id && now - victim.lastDamagedAt <= 2000) {
+          killer.kills += 1
+          this.io.emit('combat:kill', {
+            killerId: killer.id,
+            killerName: killer.name,
+            victimId: victim.id,
+            victimName: victim.name,
+            kills: killer.kills,
+          })
+        }
+
+        victim.lastDamagedBy = null
+        victim.lastDamagedAt = 0
+        this._broadcastCombatLeaderboard()
       })
 
       socket.on('player:snapshot', (state) => {
@@ -161,6 +211,7 @@ export class GameRoom {
         const player = this.players.get(socket.id)
         this.players.delete(socket.id)
         this.io.emit('player:left', { id: socket.id })
+        this._broadcastCombatLeaderboard()
         console.log(`[-] ${player?.name ?? socket.id} — ${this.players.size} online`)
       })
     })
