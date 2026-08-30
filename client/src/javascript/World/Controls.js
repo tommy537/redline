@@ -266,8 +266,10 @@ export default class Controls extends EventEmitter
 
             const dx = joy.current.x - joy.origin.x
             const dy = joy.current.y - joy.origin.y
-            const DEADZONE = 7
-            const MAX_RADIUS = 52
+            // A wider neutral zone and gentler curve prevent small thumb
+            // movements from steering the car on large iPad touchscreens.
+            const DEADZONE = 15
+            const MAX_RADIUS = 55
             const normalizeAxis = (value) =>
             {
                 const magnitude = Math.min(Math.abs(value), MAX_RADIUS)
@@ -279,7 +281,7 @@ export default class Controls extends EventEmitter
             const normalizedY = normalizeAxis(dy)
             const steer = normalizedX === 0
                 ? 0
-                : Math.sign(normalizedX) * Math.pow(Math.abs(normalizedX), 1.5)
+                : Math.sign(normalizedX) * Math.pow(Math.abs(normalizedX), 2)
             const throttle = - normalizedY
 
             const left  = steer < 0
