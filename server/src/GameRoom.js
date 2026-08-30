@@ -32,6 +32,7 @@ export class GameRoom {
   }
 
   _broadcastCombatLeaderboard(gameMode) {
+    if (gameMode !== 'combat' && gameMode !== 'team-combat') return
     this.io.to(gameMode).emit('combat:leaderboard', {
       players: this._getCombatLeaderboard(gameMode),
     })
@@ -98,7 +99,9 @@ export class GameRoom {
       socket.on('player:join', ({ name, carColor, carType, gameMode: requestedMode }) => {
         if (this.players.has(socket.id)) return
 
-        const gameMode = requestedMode === 'team-combat' ? 'team-combat' : 'combat'
+        const gameMode = ['race', 'combat', 'team-combat'].includes(requestedMode)
+          ? requestedMode
+          : 'combat'
         const modePlayers = this._playersForMode(gameMode)
         const modeLimit = gameMode === 'team-combat' ? TEAM_MAX_PLAYERS : maxPlayers
         if (modePlayers.length >= modeLimit) {

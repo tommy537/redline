@@ -41,6 +41,7 @@ export default class EntryFlow
         this.$menu       = document.getElementById('redline-menu')
         this.$onboarding = document.getElementById('redline-onboarding')
         this.$grain      = document.getElementById('redline-grain')
+        this.$chooseMode = document.getElementById('btn-choose-mode')
 
         this._currentMode = null
         this._screen      = 'title'
@@ -70,25 +71,26 @@ export default class EntryFlow
           .fromTo(version,  { opacity: 0 }, { opacity: 1, duration: 0.4 }, '-=0.4')
           .fromTo(prompt,   { opacity: 0 }, { opacity: 0.4, duration: 0.4 }, '-=0.1')
 
-        // Listen for any key to advance
+        // The title has one explicit action. Enter/Space mirror the button for
+        // keyboard users without making every random key skip the screen.
         this._titleHandler = (e) =>
         {
-            // Ignore modifier-only key presses
-            if(e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta') return
+            if(e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
             this._goMenu()
         }
-        document.addEventListener('keydown', this._titleHandler, { once: true })
+        document.addEventListener('keydown', this._titleHandler)
 
-        // Click also works
+        // Only the Choose Mode button advances the screen.
         this._titleClickHandler = () => this._goMenu()
-        this.$title.addEventListener('click', this._titleClickHandler, { once: true })
+        this.$chooseMode.addEventListener('click', this._titleClickHandler, { once: true })
     }
 
     _goMenu()
     {
         if(this._screen !== 'title') return
         document.removeEventListener('keydown', this._titleHandler)
-        this.$title.removeEventListener('click', this._titleClickHandler)
+        this.$chooseMode.removeEventListener('click', this._titleClickHandler)
 
         this._screen      = 'transitioning'
 

@@ -360,12 +360,21 @@
     font-weight: 500;
     letter-spacing: 0.3em;
     color: var(--rl-text-dim);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
     z-index: 1;
     animation: rl-pulse 2s ease-in-out infinite;
 }
 
 .rl-prompt::before { content: '['; margin-right: var(--rl-2); color: var(--rl-redline); }
 .rl-prompt::after  { content: ']'; margin-left:  var(--rl-2); color: var(--rl-redline); }
+
+.rl-prompt:hover,
+.rl-prompt:focus-visible {
+    color: var(--rl-text);
+    outline: none;
+}
 
 @keyframes rl-pulse {
     0%, 100% { opacity: 0.4; }
@@ -447,20 +456,20 @@
 /* Mode cards */
 .rl-cards {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 320px));
+    grid-template-columns: repeat(3, minmax(0, 320px));
     gap: var(--rl-6);
     width: 100%;
-    max-width: 720px;
+    max-width: 1080px;
     margin: 0 auto;
     padding: 0 var(--rl-4);
     box-sizing: content-box;
 }
 
-/* Tablet: two cards remain fluid so they don't overflow */
+/* Tablet: three cards remain fluid so they don't overflow */
 @media (max-width: 1080px) {
     .rl-cards {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        max-width: 720px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-width: 100%;
         padding: 0 var(--rl-6);
     }
 }
@@ -523,11 +532,6 @@
 .rl-card[data-mode="combat"]  { --card-accent: var(--rl-redline); }
 .rl-card[data-mode="team-combat"] { --card-accent: var(--rl-amber); }
 .rl-card[data-mode="arcade"]  { --card-accent: var(--rl-amber); }
-
-/* Race mode is currently hidden from the menu */
-.rl-card[data-mode="race"] { display: none; }
-.rl-pill[data-mode="race"] { display: none; }
-.rl-pill[data-mode="race"] + .rl-pill-divider { display: none; }
 
 .rl-card-icon {
     font-size: 32px;
