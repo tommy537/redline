@@ -19,6 +19,15 @@ const MODE_DATA = {
         controls:   '<kbd>WASD</kbd> drive · <kbd>SHIFT</kbd> boost · <kbd>X</kbd> brake · <kbd>SPACE</kbd> jump · <kbd>F</kbd> fire · <kbd>R</kbd> respawn',
         tips:       'Grab ammo crates and health crystals. Missiles home toward enemies. <em>Watch for meteor markers</em> on the ground — dodge or take 32 HP.',
     },
+    'team-combat': {
+        num:        '03',
+        name:       'TEAM BATTLE',
+        icon:       '⚔️',
+        accent:     'var(--rl-amber)',
+        objective:  'Fight for <em>Red or Blue</em>. Enemy kills score for your team; friendly fire is disabled.',
+        controls:   '<kbd>WASD</kbd> drive · <kbd>SHIFT</kbd> boost · <kbd>X</kbd> brake · <kbd>SPACE</kbd> jump · <kbd>F</kbd> fire · <kbd>R</kbd> respawn',
+        tips:       'Teams are auto-balanced when players join. Stay near teammates, collect ammo and health, and focus enemy cars.',
+    },
 }
 
 export default class EntryFlow
@@ -81,10 +90,6 @@ export default class EntryFlow
         document.removeEventListener('keydown', this._titleHandler)
         this.$title.removeEventListener('click', this._titleClickHandler)
 
-        // SHORTCUT: With Race hidden, Combat is the only mode — skip the
-        // menu and onboarding entirely. Title press-key goes straight
-        // into the game, only the lobby (name/color/car) stands between.
-        this._currentMode = 'combat'
         this._screen      = 'transitioning'
 
         const wordmark = this.$title.querySelector('.rl-wordmark')
@@ -94,10 +99,7 @@ export default class EntryFlow
             onComplete: () =>
             {
                 this.$title.classList.remove('is-active')
-                this.$grain?.classList.add('hidden')
-                this.config.gameMode = 'combat'
-                this.config.soloMode = false
-                this.onComplete?.()
+                this._showMenu()
             },
         })
         .to([wordmark, tagline, '.rl-slash', '.rl-prompt', '.rl-mode-pills'], {

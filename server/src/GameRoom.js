@@ -3,20 +3,26 @@ import { PhysicsWorld } from './PhysicsWorld.js'
 import { NETWORK, SPAWN_GRID } from '../../shared/constants.js'
 
 const { tickRate, physicsRate, maxPlayers } = NETWORK
+const TEAM_MAX_PLAYERS = 8
 
 export class GameRoom {
   constructor(io) {
     this.io      = io
     this.physics = new PhysicsWorld()
     this.players = new Map() // socketId → { id, name, carColor, actions }
+    this.teamScores = { red: 0, blue: 0 }
 
     this._startLoop()
     this._setupSocketEvents()
     this._startMeteorShower()
   }
 
-  _getCombatLeaderboard() {
-    return [...this.players.values()]
+  _playersForMode(gameMode) {
+    return [...this.players.values()].filter(player => player.gameMode === gameMode)
+  }
+
+  _getCombatLeaderboard(gameMode) {
+    return this._playersForMode(gameMode)
       .map(({ id, name, kills = 0, deaths = 0 }) => ({ id, name, kills, deaths }))
       .sort((a, b) =>
         b.kills - a.kills ||
@@ -25,10 +31,33 @@ export class GameRoom {
       )
   }
 
-  _broadcastCombatLeaderboard() {
-    this.io.emit('combat:leaderboard', {
-      players: this._getCombatLeaderboard(),
+  _broadcastCombatLeaderboard(gameMode) {
+    this.io.to(gameMode).emit('combat:leaderboard', {
+      players: this._getCombatLeaderboard(gameMode),
     })
+  }
+
+  _assignTeam() {
+    const teamPlayers = this._playersForMode('team-combat')
+    const redCount = teamPlayers.filter(player => player.team === 'red').length
+    const blueCount = teamPlayers.filter(player => player.team === 'blue').length
+    return redCount <= blueCount ? 'red' : 'blue'
+  }
+
+  _getTeamState() {
+    const players = this._playersForMode('team-combat')
+    const makeRoster = team => players
+      .filter(player => player.team === team)
+      .map(({ id, name, kills = 0, deaths = 0 }) => ({ id, name, kills, deaths, team }))
+
+    return {
+      red: { score: this.teamScores.red, players: makeRoster('red') },
+      blue: { score: this.teamScores.blue, players: makeRoster('blue') },
+    }
+  }
+
+  _broadcastTeamState() {
+    this.io.to('team-combat').emit('team:state', this._getTeamState())
   }
 
   // Server-driven meteor shower so all players see the same impacts.
@@ -38,8 +67,13 @@ export class GameRoom {
     const tick = () => {
       const delay = 250 + Math.random() * 350   // 250–600ms (avg ~425ms)
       setTimeout(() => {
-        if (this.players.size > 0) {
-          this.io.emit('combat:meteor', {
+        const activeModes = new Set(
+          [...this.players.values()]
+            .map(player => player.gameMode)
+            .filter(mode => mode === 'combat' || mode === 'team-combat')
+        )
+        for (const gameMode of activeModes) {
+          this.io.to(gameMode).emit('combat:meteor', {
             x: (Math.random() - 0.5) * SPAWN_RANGE * 2,
             y: (Math.random() - 0.5) * SPAWN_RANGE * 2,
             t: Date.now(),
@@ -53,12 +87,6 @@ export class GameRoom {
 
   _setupSocketEvents() {
     this.io.on('connection', (socket) => {
-      if (this.players.size >= maxPlayers) {
-        socket.emit('room:full')
-        socket.disconnect()
-        return
-      }
-
       console.log(`[+] ${socket.id}`)
 
       socket.on('ping', (cb) => {
@@ -67,8 +95,20 @@ export class GameRoom {
         if(typeof cb === 'function') cb(Date.now())
       })
 
-      socket.on('player:join', ({ name, carColor, carType }) => {
-        const spawnPos = this._getSpawnPosition()
+      socket.on('player:join', ({ name, carColor, carType, gameMode: requestedMode }) => {
+        if (this.players.has(socket.id)) return
+
+        const gameMode = requestedMode === 'team-combat' ? 'team-combat' : 'combat'
+        const modePlayers = this._playersForMode(gameMode)
+        const modeLimit = gameMode === 'team-combat' ? TEAM_MAX_PLAYERS : maxPlayers
+        if (modePlayers.length >= modeLimit) {
+          socket.emit('room:full')
+          return
+        }
+
+        const team = gameMode === 'team-combat' ? this._assignTeam() : null
+        const spawnPos = this._getSpawnPosition(gameMode)
+        socket.join(gameMode)
         this.physics.addCar(socket.id, spawnPos)
 
         this.players.set(socket.id, {
@@ -76,6 +116,8 @@ export class GameRoom {
           name:     name || 'Anonymous',
           carColor: carColor ?? 0,
           carType:  carType || 'default',
+          gameMode,
+          team,
           actions:  { up: false, down: false, left: false, right: false, brake: false, boost: false, steer: 0, throttle: 0 },
           spawnXY:  { x: spawnPos.x, y: spawnPos.y },
           kills:    0,
@@ -87,23 +129,32 @@ export class GameRoom {
 
         // Send existing players to new joiner
         const existingPlayers = [...this.players.values()]
-          .filter(p => p.id !== socket.id)
-          .map(({ id, name, carColor, carType }) => ({ id, name, carColor, carType }))
+          .filter(p => p.id !== socket.id && p.gameMode === gameMode)
+          .map(({ id, name, carColor, carType, team }) => ({ id, name, carColor, carType, team }))
 
         // Include spawn position so client can initialise the local car at the same spot
-        socket.emit('room:joined', { id: socket.id, existingPlayers, spawnPos: { x: spawnPos.x, y: spawnPos.y } })
+        socket.emit('room:joined', {
+          id: socket.id,
+          existingPlayers,
+          spawnPos: { x: spawnPos.x, y: spawnPos.y },
+          gameMode,
+          team,
+          teamState: gameMode === 'team-combat' ? this._getTeamState() : null,
+        })
 
         // Notify everyone else
-        socket.broadcast.emit('player:joined', {
+        socket.to(gameMode).emit('player:joined', {
           id: socket.id,
           name: name || 'Anonymous',
           carColor: carColor ?? 0,
           carType:  carType || 'default',
+          team,
         })
 
-        this._broadcastCombatLeaderboard()
+        this._broadcastCombatLeaderboard(gameMode)
+        if (gameMode === 'team-combat') this._broadcastTeamState()
 
-        console.log(`[join] ${name} (${socket.id}) — ${this.players.size} online`)
+        console.log(`[join] ${name} (${socket.id}) — ${gameMode}${team ? `/${team}` : ''}`)
       })
 
       socket.on('player:ready', () => {
@@ -128,7 +179,9 @@ export class GameRoom {
       socket.on('player:bump', ({ targetId, fromPos }) => {
         // Relay bump to the target player so their car reacts too
         const targetSocket = this.io.sockets.sockets.get(targetId)
-        if (targetSocket) {
+        const source = this.players.get(socket.id)
+        const target = this.players.get(targetId)
+        if (targetSocket && source && target && source.gameMode === target.gameMode) {
           targetSocket.emit('player:bumped', { fromId: socket.id, fromPos })
         }
       })
@@ -139,7 +192,7 @@ export class GameRoom {
         const clean = text.slice(0, 120).trim()
         if (!clean) return
         // Broadcast to everyone else
-        socket.broadcast.emit('chat:message', {
+        socket.to(player.gameMode).emit('chat:message', {
           name: player.name,
           text: clean,
           color: player.carColor ?? 0,
@@ -147,8 +200,10 @@ export class GameRoom {
       })
 
       socket.on('combat:missile', (data) => {
+        const player = this.players.get(socket.id)
+        if (!player) return
         console.log(`[combat] missile from ${socket.id}`, data)
-        socket.broadcast.emit('combat:missile', { fromId: socket.id, ...data })
+        socket.to(player.gameMode).emit('combat:missile', { fromId: socket.id, ...data })
       })
 
       socket.on('player:combatDamage', ({ targetId, amount }) => {
@@ -156,46 +211,56 @@ export class GameRoom {
         const targetSocket = this.io.sockets.sockets.get(targetId)
         const attacker = this.players.get(socket.id)
         const target = this.players.get(targetId)
-        if (targetSocket && attacker && target && targetId !== socket.id) {
+        const sameMode = attacker && target && attacker.gameMode === target.gameMode
+        const friendlyFire = sameMode && attacker.gameMode === 'team-combat' && attacker.team === target.team
+        const validAmount = Number.isFinite(amount) && amount > 0 ? Math.min(amount, 100) : 0
+        if (targetSocket && sameMode && !friendlyFire && targetId !== socket.id && validAmount > 0) {
           target.lastDamagedBy = socket.id
           target.lastDamagedAt = Date.now()
-          targetSocket.emit('player:combatDamage', { fromId: socket.id, amount })
-        } else {
-          console.warn(`[combat] target socket ${targetId} not found`)
+          targetSocket.emit('player:combatDamage', { fromId: socket.id, amount: validAmount })
         }
       })
 
       socket.on('combat:explosion', (data) => {
+        const player = this.players.get(socket.id)
+        if (!player) return
         // Broadcast explosion position to all other players
-        socket.broadcast.emit('combat:explosion', { fromId: socket.id, ...data })
+        socket.to(player.gameMode).emit('combat:explosion', { fromId: socket.id, ...data })
       })
 
       socket.on('combat:carDestroyed', (data) => {
-        console.log(`[combat] car destroyed: ${socket.id}`)
-        socket.broadcast.emit('combat:carDestroyed', { fromId: socket.id, ...data })
-
         const victim = this.players.get(socket.id)
+        if (!victim) return
+        console.log(`[combat] car destroyed: ${socket.id}`)
+        socket.to(victim.gameMode).emit('combat:carDestroyed', { fromId: socket.id, ...data })
+
         const now = Date.now()
-        if (!victim || now - victim.lastDeathAt < 2500) return
+        if (now - victim.lastDeathAt < 2500) return
 
         victim.lastDeathAt = now
         victim.deaths += 1
 
         const killer = this.players.get(victim.lastDamagedBy)
-        if (killer && killer.id !== victim.id && now - victim.lastDamagedAt <= 2000) {
+        if (killer && killer.id !== victim.id && killer.gameMode === victim.gameMode && now - victim.lastDamagedAt <= 2000) {
           killer.kills += 1
-          this.io.emit('combat:kill', {
+          if (victim.gameMode === 'team-combat' && killer.team && killer.team !== victim.team) {
+            this.teamScores[killer.team] += 1
+          }
+          this.io.to(victim.gameMode).emit('combat:kill', {
             killerId: killer.id,
             killerName: killer.name,
+            killerTeam: killer.team,
             victimId: victim.id,
             victimName: victim.name,
+            victimTeam: victim.team,
             kills: killer.kills,
           })
         }
 
         victim.lastDamagedBy = null
         victim.lastDamagedAt = 0
-        this._broadcastCombatLeaderboard()
+        this._broadcastCombatLeaderboard(victim.gameMode)
+        if (victim.gameMode === 'team-combat') this._broadcastTeamState()
       })
 
       socket.on('player:snapshot', (state) => {
@@ -210,8 +275,17 @@ export class GameRoom {
         this.physics.removeCar(socket.id)
         const player = this.players.get(socket.id)
         this.players.delete(socket.id)
-        this.io.emit('player:left', { id: socket.id })
-        this._broadcastCombatLeaderboard()
+        if (player) {
+          this.io.to(player.gameMode).emit('player:left', { id: socket.id })
+          this._broadcastCombatLeaderboard(player.gameMode)
+          if (player.gameMode === 'team-combat') {
+            if (this._playersForMode('team-combat').length === 0) {
+              this.teamScores.red = 0
+              this.teamScores.blue = 0
+            }
+            this._broadcastTeamState()
+          }
+        }
         console.log(`[-] ${player?.name ?? socket.id} — ${this.players.size} online`)
       })
     })
@@ -241,22 +315,23 @@ export class GameRoom {
       broadcastAccum += delta * 1000
       if (broadcastAccum >= broadcastInterval) {
         broadcastAccum -= broadcastInterval
-        const cars = []
+        const carsByMode = new Map()
         for (const [id, player] of this.players) {
           if (player.clientSnapshot) {
-            cars.push({ id, ...player.clientSnapshot })
+            if (!carsByMode.has(player.gameMode)) carsByMode.set(player.gameMode, [])
+            carsByMode.get(player.gameMode).push({ id, ...player.clientSnapshot })
           }
         }
-        if (cars.length > 0) {
-          this.io.emit('world:snapshot', { t: now, cars })
+        for (const [gameMode, cars] of carsByMode) {
+          this.io.to(gameMode).emit('world:snapshot', { t: now, cars })
         }
       }
     }, physicsInterval)
   }
 
-  _getSpawnPosition() {
+  _getSpawnPosition(gameMode) {
     // Assign grid slot based on current player count (wraps if full)
-    const slot = this.players.size % SPAWN_GRID.length
+    const slot = this._playersForMode(gameMode).length % SPAWN_GRID.length
     const { x, y } = SPAWN_GRID[slot]
     return { x, y, z: 12 }
   }

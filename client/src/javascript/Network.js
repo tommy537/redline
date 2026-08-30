@@ -13,6 +13,9 @@ export default class Network extends EventEmitter
         this.serverTimeOffset = 0     // serverTime ≈ Date.now() + offset
         this._pingInterval = null
         this.combatLeaderboard = null
+        this.teamState = null
+        this.localTeam = null
+        this.gameMode = null
     }
 
     // Returns the current server clock estimate (used for interpolation
@@ -47,12 +50,15 @@ export default class Network extends EventEmitter
             this.trigger('disconnected')
         })
 
-        this.socket.on('room:joined', ({ id, existingPlayers, spawnPos }) =>
+        this.socket.on('room:joined', ({ id, existingPlayers, spawnPos, gameMode, team, teamState }) =>
         {
             console.log('[network] room:joined — my id=', id, 'existing=', existingPlayers, 'spawnPos=', spawnPos)
             this.localId  = id
             this.spawnPos = spawnPos   // { x, y } — used by World to position local car
-            this.trigger('room:joined', [{ id, existingPlayers, spawnPos }])
+            this.gameMode = gameMode
+            this.localTeam = team
+            if(teamState) this.teamState = teamState
+            this.trigger('room:joined', [{ id, existingPlayers, spawnPos, gameMode, team, teamState }])
         })
 
         this.socket.on('room:full', () =>
@@ -127,6 +133,12 @@ export default class Network extends EventEmitter
             this.trigger('combat:leaderboard', [data])
         })
 
+        this.socket.on('team:state', (data) =>
+        {
+            this.teamState = data
+            this.trigger('team:state', [data])
+        })
+
         this.socket.on('combat:meteor', (data) =>
         {
             this.trigger('combat:meteor', [data])
@@ -160,11 +172,11 @@ export default class Network extends EventEmitter
         }, 1500)
     }
 
-    join(name, carColor, carType = 'default')
+    join(name, carColor, carType = 'default', gameMode = 'combat')
     {
         this.localPlayerName = name
         this._wasJoined        = true
-        this._lastJoinPayload  = { name, carColor, carType }
+        this._lastJoinPayload  = { name, carColor, carType, gameMode }
         this.socket.emit('player:join', this._lastJoinPayload)
     }
 

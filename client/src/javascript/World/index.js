@@ -81,7 +81,7 @@ export default class World
         // Mode flags — only 'race' and 'combat' supported
         const mode   = this.config.gameMode || 'race'
         const race   = mode === 'race'
-        const combat = mode === 'combat'
+        const combat = mode === 'combat' || mode === 'team-combat'
 
         this.setReveal()
         this.setMaterials()
@@ -768,7 +768,7 @@ export default class World
         this.combatPickups = new CombatPickups({
             scene:   this.scene,
             physics: this.physics,
-            layout:  (this.config.gameMode === 'combat') ? 'arena' : 'track',   // combat = arena pickups; race never gets here
+            layout:  (this.config.gameMode === 'combat' || this.config.gameMode === 'team-combat') ? 'arena' : 'track',
             onCollect: ({ type, value }) =>
             {
                 if(type === 'ammo')
@@ -1251,11 +1251,15 @@ export default class World
     _setupCombatEnd()
     {
         const TARGET_KILLS = 5
+        const teamCombat = this.config.gameMode === 'team-combat'
         this._kills = 0
         this._combatOver = false
 
         const $kc = document.getElementById('kill-counter')
         if($kc) $kc.classList.add('visible')
+        const $kcLabel = $kc?.querySelector('.kc-label')
+        const $kcTarget = $kc?.querySelector('.kc-target')
+        if(teamCombat && $kcLabel) $kcLabel.textContent = 'TEAM'
         this._updateKillCounter(0, TARGET_KILLS)
 
         const $leaderboard = document.getElementById('leaderboard')
@@ -1264,7 +1268,7 @@ export default class World
         {
             $leaderboard.classList.add('visible', 'combat')
         }
-        if($leaderboardTitle) $leaderboardTitle.textContent = 'KILL LEADERS'
+        if($leaderboardTitle) $leaderboardTitle.textContent = teamCombat ? 'TEAM PLAYERS' : 'KILL LEADERS'
 
         if(this.network)
         {
@@ -1274,9 +1278,9 @@ export default class World
 
                 const localPlayer = players.find(player => player.id === this.network.localId)
                 this._kills = localPlayer?.kills ?? 0
-                this._updateKillCounter(this._kills, TARGET_KILLS)
+                if(!teamCombat) this._updateKillCounter(this._kills, TARGET_KILLS)
 
-                if(!this._combatOver && this._kills >= TARGET_KILLS)
+                if(!teamCombat && !this._combatOver && this._kills >= TARGET_KILLS)
                 {
                     this._combatOver = true
                     setTimeout(() => this._showCombatComplete(this._kills), 1000)
@@ -1289,6 +1293,23 @@ export default class World
                 if(killerId === this.network.localId)
                     this._showCombatPickup?.('+1 KILL', '#FF2E4D')
             })
+
+            if(teamCombat)
+            {
+                const applyTeamScore = (state) =>
+                {
+                    const localTeam = this.network.localTeam
+                    if(!localTeam) return
+                    const enemyTeam = localTeam === 'red' ? 'blue' : 'red'
+                    const ownScore = state[localTeam]?.score ?? 0
+                    const enemyScore = state[enemyTeam]?.score ?? 0
+                    this._updateKillCounter(`${ownScore}-${enemyScore}`, 0)
+                    if($kcTarget) $kcTarget.textContent = localTeam.toUpperCase()
+                }
+
+                this.network.on('team:state', applyTeamScore)
+                if(this.network.teamState) applyTeamScore(this.network.teamState)
+            }
 
             if(this.network.combatLeaderboard)
                 applyLeaderboard(this.network.combatLeaderboard)

@@ -59,7 +59,7 @@ export default class Application
         this.config.cyberTruck = window.location.hash === '#cybertruck'
         this.config.touch      = false
         this.config.soloMode   = false                  // multiplayer-only
-        this.config.gameMode   = 'race'                 // 'race' | 'combat'
+        this.config.gameMode   = 'combat'               // 'combat' | 'team-combat'
 
         window.addEventListener('touchstart', () =>
         {

@@ -29,7 +29,7 @@ export default class Environment
         this._buildSky()
 
         // Track-only environment elements — skip in pure combat (no track)
-        if(this.gameMode !== 'combat')
+        if(this.gameMode !== 'combat' && this.gameMode !== 'team-combat')
         {
             this._buildGantry()
             this._buildTrees()

@@ -11,8 +11,10 @@ export default class LobbyUI
         this.$lobby = document.getElementById('lobby')
         this.$hud   = document.getElementById('mp-hud')
         this.$toast = document.getElementById('mp-toast')
+        this.$teamRoster = document.getElementById('team-roster')
 
         this._toastTimer  = null
+        this._teamRosterTimer = null
         this._onlineCount = 1
 
         // Load saved config from localStorage, fall back to defaults
@@ -201,7 +203,7 @@ export default class LobbyUI
 
         if(this.network)
         {
-            this.network.join(this._name, this._colorIdx, this._carType)
+            this.network.join(this._name, this._colorIdx, this._carType, this.config.gameMode)
         }
         else
         {
@@ -226,11 +228,16 @@ export default class LobbyUI
             this.showToast('Connection lost — reconnecting...')
         })
 
-        this.network.on('room:joined', ({ existingPlayers }) =>
+        this.network.on('room:joined', ({ existingPlayers, team, teamState }) =>
         {
             this._onlineCount = existingPlayers.length + 1
             this.$hud.style.display = 'block'
             this._updateHUD()
+            if(team)
+            {
+                this.showToast(`Assigned to TEAM ${team.toUpperCase()}`)
+                if(teamState) this._renderTeamState(teamState)
+            }
         })
 
         this.network.on('room:full', () =>
@@ -252,11 +259,53 @@ export default class LobbyUI
             this._onlineCount = Math.max(1, this._onlineCount - 1)
             this._updateHUD()
         })
+
+        this.network.on('team:state', (state) =>
+        {
+            this._renderTeamState(state)
+        })
     }
 
     _updateHUD()
     {
         if(this.$hud) this.$hud.textContent = `${this._onlineCount} online`
+    }
+
+    _renderTeamState(state)
+    {
+        if(!this.$teamRoster || this.config.gameMode !== 'team-combat') return
+
+        const $redScore = this.$teamRoster.querySelector('.tr-red-score')
+        const $blueScore = this.$teamRoster.querySelector('.tr-blue-score')
+        const $redList = document.getElementById('tr-red-list')
+        const $blueList = document.getElementById('tr-blue-list')
+
+        if($redScore) $redScore.textContent = `RED ${state.red?.score ?? 0}`
+        if($blueScore) $blueScore.textContent = `${state.blue?.score ?? 0} BLUE`
+
+        const renderPlayers = ($list, players = []) =>
+        {
+            if(!$list) return
+            $list.innerHTML = ''
+            players.forEach(player =>
+            {
+                const $item = document.createElement('li')
+                const isLocal = player.id === this.network.localId
+                if(isLocal) $item.classList.add('is-you')
+                $item.textContent = isLocal ? `${player.name} (YOU)` : player.name
+                $list.appendChild($item)
+            })
+        }
+
+        renderPlayers($redList, state.red?.players)
+        renderPlayers($blueList, state.blue?.players)
+
+        this.$teamRoster.classList.add('visible')
+        clearTimeout(this._teamRosterTimer)
+        this._teamRosterTimer = setTimeout(() =>
+        {
+            this.$teamRoster.classList.remove('visible')
+        }, 5000)
     }
 
     showToast(message, duration = 3000)

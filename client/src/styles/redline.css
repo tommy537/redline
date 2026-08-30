@@ -334,6 +334,7 @@
 
 .rl-pill[data-mode="race"]:hover   { color: var(--rl-cyan);    border-color: var(--rl-cyan); }
 .rl-pill[data-mode="combat"]:hover { color: var(--rl-redline); border-color: var(--rl-redline); }
+.rl-pill[data-mode="team-combat"]:hover { color: var(--rl-amber); border-color: var(--rl-amber); }
 .rl-pill[data-mode="arcade"]:hover { color: var(--rl-amber);   border-color: var(--rl-amber); }
 
 .rl-pill-divider {
@@ -446,20 +447,20 @@
 /* Mode cards */
 .rl-cards {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 320px));
+    grid-template-columns: repeat(2, minmax(0, 320px));
     gap: var(--rl-6);
     width: 100%;
-    max-width: 1080px;
+    max-width: 720px;
     margin: 0 auto;
     padding: 0 var(--rl-4);
     box-sizing: content-box;
 }
 
-/* Tablet: 3 cards but fluid so they don't overflow */
+/* Tablet: two cards remain fluid so they don't overflow */
 @media (max-width: 1080px) {
     .rl-cards {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        max-width: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-width: 720px;
         padding: 0 var(--rl-6);
     }
 }
@@ -520,6 +521,7 @@
 
 .rl-card[data-mode="race"]    { --card-accent: var(--rl-cyan); }
 .rl-card[data-mode="combat"]  { --card-accent: var(--rl-redline); }
+.rl-card[data-mode="team-combat"] { --card-accent: var(--rl-amber); }
 .rl-card[data-mode="arcade"]  { --card-accent: var(--rl-amber); }
 
 /* Race mode is currently hidden from the menu */
@@ -1172,6 +1174,66 @@
 #leaderboard.combat .lb-best .lb-kills {
     color: #f1c40f;
 }
+
+/* ── Team Battle: temporary roster shown on join/team updates ──────────── */
+#team-roster {
+    display: none;
+    position: fixed;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(420px, calc(100vw - 32px));
+    padding: 12px 16px 14px;
+    color: var(--rl-text);
+    background: rgba(0, 0, 0, 0.72);
+    -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--rl-radius-md);
+    font-family: var(--rl-font-mono);
+    z-index: 510;
+    pointer-events: none;
+}
+
+#team-roster.visible { display: block; }
+
+.tr-title {
+    color: var(--rl-text-dim);
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-align: center;
+}
+
+.tr-score {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin: 7px 0 10px;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.tr-red-score, .tr-team-red .tr-team-name { color: #ff4d5f; }
+.tr-blue-score, .tr-team-blue .tr-team-name { color: #4da3ff; }
+
+.tr-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.tr-team { min-width: 0; }
+.tr-team-name { font-size: 10px; letter-spacing: 0.2em; }
+.tr-team ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.tr-team li {
+    overflow: hidden;
+    padding: 3px 0;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tr-team li.is-you { color: #fff; font-weight: 700; }
 
 /* ─────────────────────────────────────────────────────────────────────────
    RESPONSIVE — Entry flow (title / menu / onboarding / loading)

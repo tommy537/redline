@@ -13,6 +13,8 @@ Add a family-friendly `team-combat` mode for 2–8 players without regressing th
 
 ## Phase 1 — Team identity and lobby
 
+Status: implemented on `fix/controll-more-easy`.
+
 Deliverables:
 
 - Add `team-combat` to the game-mode model.
@@ -34,6 +36,8 @@ Acceptance:
 - Reconnecting players receive an assigned team and all clients show the same rosters.
 
 ## Phase 2 — Team combat rules
+
+Status: implemented on `fix/controll-more-easy`.
 
 Deliverables:
 

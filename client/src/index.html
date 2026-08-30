@@ -1040,6 +1040,8 @@
                 <span class="rl-pill" data-mode="race">🏁 RACE</span>
                 <span class="rl-pill rl-pill-divider"></span>
                 <span class="rl-pill" data-mode="combat">💥 COMBAT</span>
+                <span class="rl-pill rl-pill-divider"></span>
+                <span class="rl-pill" data-mode="team-combat">⚔️ TEAM BATTLE</span>
             </div>
         </div>
         <div class="rl-prompt">PRESS ANY KEY</div>
@@ -1078,6 +1080,18 @@
                     <div class="rl-card-name">COMBAT</div>
                     <div class="rl-card-desc">Five kills. Last car running. Missiles, pickups, debris, mayhem.</div>
                     <div class="rl-card-stats"><span>5</span><em>·</em><span>KILLS</span><em>·</em><span>FREE-FOR-ALL</span></div>
+                    <div class="rl-card-cta">
+                        <span>Enter</span>
+                        <span class="rl-card-cta-arrow" aria-hidden="true">→</span>
+                    </div>
+                </button>
+
+                <button class="rl-card" data-mode="team-combat" type="button" role="listitem">
+                    <div class="rl-card-icon" aria-hidden="true">⚔️</div>
+                    <div class="rl-card-label">Mode 03</div>
+                    <div class="rl-card-name">TEAM BATTLE</div>
+                    <div class="rl-card-desc">Red versus Blue. Enemy kills score for the team. Friendly fire is disabled.</div>
+                    <div class="rl-card-stats"><span>2</span><em>·</em><span>TEAMS</span><em>·</em><span>AUTO-BALANCE</span></div>
                     <div class="rl-card-cta">
                         <span>Enter</span>
                         <span class="rl-card-cta-arrow" aria-hidden="true">→</span>
@@ -1450,6 +1464,26 @@
         <span class="kc-label">KILLS</span>
         <span class="kc-val" id="kc-value">0</span>
         <span class="kc-target">/ 5</span>
+    </div>
+
+    <!-- Team assignment roster (team-combat join/update preview) -->
+    <div id="team-roster" aria-live="polite">
+        <div class="tr-title">TEAM BATTLE</div>
+        <div class="tr-score">
+            <span class="tr-red-score">RED 0</span>
+            <span>—</span>
+            <span class="tr-blue-score">0 BLUE</span>
+        </div>
+        <div class="tr-columns">
+            <div class="tr-team tr-team-red">
+                <div class="tr-team-name">RED</div>
+                <ul id="tr-red-list"></ul>
+            </div>
+            <div class="tr-team tr-team-blue">
+                <div class="tr-team-name">BLUE</div>
+                <ul id="tr-blue-list"></ul>
+            </div>
+        </div>
     </div>
 
     <!-- Toast for join/leave events -->
