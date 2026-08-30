@@ -1,6 +1,8 @@
 import CANNON from 'cannon'
 import * as THREE from 'three'
 
+const FIXED_TIME_STEP = 1 / 60
+
 export default class Physics
 {
     constructor(_options)
@@ -27,7 +29,7 @@ export default class Physics
 
         this.time.on('tick', () =>
         {
-            this.world.step(1 / 60, this.time.delta / 1000, 3)
+            this.world.step(FIXED_TIME_STEP, this.time.delta / 1000, 3)
         })
     }
 
@@ -388,7 +390,10 @@ export default class Physics
             positionDelta = positionDelta.vsub(this.car.oldPosition)
 
             this.car.oldPosition.copy(this.car.chassis.body.position)
-            this.car.speed = positionDelta.length() / this.time.delta
+            // postStep runs once per fixed physics substep. Dividing by the
+            // render-frame delta under-reports speed when Cannon catches up
+            // with multiple substeps (for example at 30 FPS on an iPad).
+            this.car.speed = positionDelta.length() / (FIXED_TIME_STEP * 1000)
 
             // Update forward
             const localForward = new CANNON.Vec3(1, 0, 0)
