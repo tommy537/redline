@@ -8,3 +8,7 @@ test-screenshots/
 
 # Logs
 *.log
+
+# Runtime player history
+server/data/*.json
+server/data/*.tmp

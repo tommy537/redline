@@ -112,6 +112,9 @@ export default class Network extends EventEmitter
             console.log('[net] ← player:combatDamage received', data)
             this.trigger('player:combatDamage', [data])
         })
+        this.socket.on('player:combatHealth', (data) => this.trigger('player:combatHealth', [data]))
+        this.socket.on('player:combatRespawn', (data) => this.trigger('player:combatRespawn', [data]))
+        this.socket.on('combat:carRespawn', (data) => this.trigger('combat:carRespawn', [data]))
 
         this.socket.on('combat:explosion', (data) =>
         {
@@ -219,6 +222,11 @@ export default class Network extends EventEmitter
     sendExplosion(x, y, z)
     {
         this.socket.emit('combat:explosion', { x, y, z })
+    }
+
+    sendCombatPickup(idx, type)
+    {
+        this.socket.emit('combat:pickup', { idx, type })
     }
 
     sendCarDestroyed(x, y, z, vx, vy, color)

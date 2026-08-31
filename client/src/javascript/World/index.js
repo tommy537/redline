@@ -758,7 +758,11 @@ export default class World
 
             this.network.on('combat:carDestroyed', ({ fromId, x, y, z, vx, vy, color }) =>
             {
-                this._destroyRemoteCar(fromId, x, y, z, vx, vy, color)
+                if(fromId !== this.network.localId) this._destroyRemoteCar(fromId, x, y, z, vx, vy, color)
+            })
+            this.network.on('combat:carRespawn', ({ id }) =>
+            {
+                this.remoteCarManager?.cars?.get(id)?.setVisible?.(true)
             })
         }
 
@@ -766,6 +770,7 @@ export default class World
         this.healthSystem = new HealthSystem({
             physics:  this.physics,
             spawnPos: this._serverSpawnPos || { x: 5, y: -35 },
+            authoritative: Boolean(this.network),
         })
 
         // ── Pickups ──
@@ -773,7 +778,7 @@ export default class World
             scene:   this.scene,
             physics: this.physics,
             layout:  (this.config.gameMode === 'combat' || this.config.gameMode === 'team-combat') ? 'arena' : 'track',
-            onCollect: ({ type, value }) =>
+            onCollect: ({ idx, type, value }) =>
             {
                 if(type === 'ammo')
                 {
@@ -782,8 +787,9 @@ export default class World
                 }
                 if(type === 'health')
                 {
-                    this.healthSystem.heal(value)
-                    this._showCombatPickup(`+${value} HP`, '#2ecc71')
+                    if(this.network) this.network.sendCombatPickup(idx, type)
+                    else this.healthSystem.heal(value)
+                    this._showCombatPickup(this.network ? 'HEALTH REQUESTED' : `+${value} HP`, '#2ecc71')
                 }
                 this.sounds?.play('uiArea', 0)
                 this._updateCombatHUD()
@@ -845,9 +851,18 @@ export default class World
         // ── Receive damage from multiplayer ──
         if(this.network)
         {
-            this.network.on('player:combatDamage', ({ amount }) =>
+            this.network.on('player:combatDamage', ({ amount, hp }) =>
             {
-                this.healthSystem.takeDamage(amount)
+                this.healthSystem.takeDamage(amount, hp)
+            })
+            this.network.on('player:combatHealth', ({ hp, amount }) =>
+            {
+                this.healthSystem.syncHealth(hp, amount)
+                if(amount >= 5) this._showCombatPickup(`+${Math.round(amount)} HP`, '#2ecc71')
+            })
+            this.network.on('player:combatRespawn', ({ hp, spawnPos }) =>
+            {
+                this.healthSystem.respawnFromServer(spawnPos, hp)
             })
         }
 
@@ -866,6 +881,7 @@ export default class World
             scene:        this.scene,
             physics:      this.physics,
             healthSystem: this.healthSystem,
+            healingEnabled: !this.network,
         })
 
         // ── Arena minimap (fixed top-down view) ──
@@ -890,7 +906,7 @@ export default class World
             weapons:      this.weapons,
             sounds:       this.sounds,
             onShake:      () => this._shakeCamera(),
-            damageEnabled: () => this.config.gameMode !== 'team-combat' || ['playing', 'sudden-death'].includes(this._teamState?.match?.state),
+            damageEnabled: () => !this.network,
         })
 
         if(this.network)
@@ -979,8 +995,6 @@ export default class World
         if(this.car?.chassis?.object) this.car.chassis.object.visible = false
         this.car?.wheels?.items?.forEach(w => { w.visible = false })
 
-        // Sync to other players
-        if(this.network) this.network.sendCarDestroyed(px, py, pz, vx, vy, bodyColor)
     }
 
     _showLocalCar()
@@ -995,12 +1009,12 @@ export default class World
         this.weapons.explodeCar(x, y, z, vx, vy, color)
         this._shakeCamera()  // distant shake
 
-        // Hide that remote car for 3s (matches RESPAWN_MS)
+        // Server emits combat:carRespawn; timeout remains only as a visual fallback.
         const car = this.remoteCarManager?.cars?.get(id)
         if(car)
         {
             car.setVisible?.(false)
-            setTimeout(() => car.setVisible?.(true), 3000)
+            setTimeout(() => car.setVisible?.(true), 4500)
         }
     }
 
@@ -1373,6 +1387,7 @@ export default class World
             : 'Team Battle · 3 minutes'
         setText('ts-status', status)
         this._renderTeamReadyPanel(state)
+        this._renderTeamHistory(state.history || [])
 
         if(previous?.match?.state !== match.state)
         {
@@ -1428,6 +1443,32 @@ export default class World
         if(!state || !this.network?.localId) return null
         return [...(state.red?.players || []), ...(state.blue?.players || [])]
             .find(player => player.id === this.network.localId)
+    }
+
+    _renderTeamHistory(history)
+    {
+        const $body = document.querySelector('#tm-history tbody')
+        if(!$body) return
+        $body.innerHTML = ''
+        history.forEach((player, index) =>
+        {
+            const $row = document.createElement('tr')
+            const values = [
+                `#${index + 1}`,
+                player.name,
+                `${player.wins}–${player.losses}`,
+                `${player.kills}/${player.deaths}`,
+                player.mvps,
+                player.winStreak > 0 ? `🔥 ${player.winStreak}` : '0',
+            ]
+            values.forEach(value =>
+            {
+                const $cell = document.createElement('td')
+                $cell.textContent = value
+                $row.appendChild($cell)
+            })
+            $body.appendChild($row)
+        })
     }
 
     _renderTeamReadyPanel(state)

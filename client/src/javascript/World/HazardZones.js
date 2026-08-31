@@ -53,6 +53,7 @@ export default class HazardZones
         this.scene        = _options.scene
         this.physics      = _options.physics
         this.healthSystem = _options.healthSystem
+        this.healingEnabled = _options.healingEnabled ?? true
 
         this._zones      = []
         this._t          = 0
@@ -241,7 +242,7 @@ export default class HazardZones
         }
 
         // Healing tick — only when inside a healing zone and alive
-        if(inHealing && this.healthSystem && !this.healthSystem.isDead())
+        if(inHealing && this.healingEnabled && this.healthSystem && !this.healthSystem.isDead())
         {
             this._healAccum += dt
             while(this._healAccum >= HEAL_INTERVAL_MS)
