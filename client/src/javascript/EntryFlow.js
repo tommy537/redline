@@ -19,6 +19,15 @@ const MODE_DATA = {
         controls:   '<kbd>WASD</kbd> drive · <kbd>SHIFT</kbd> boost · <kbd>X</kbd> brake · <kbd>SPACE</kbd> jump · <kbd>F</kbd> fire · <kbd>R</kbd> respawn',
         tips:       'Grab ammo crates and health crystals. Missiles home toward enemies. <em>Watch for meteor markers</em> on the ground — dodge or take 32 HP.',
     },
+    'team-combat': {
+        num:        '03',
+        name:       'TEAM BATTLE',
+        icon:       '⚔️',
+        accent:     'var(--rl-amber)',
+        objective:  'Fight for <em>Red or Blue</em> for 3 minutes. A tie becomes sudden death; the next kill wins.',
+        controls:   '<kbd>WASD</kbd> drive · <kbd>SHIFT</kbd> boost · <kbd>X</kbd> brake · <kbd>SPACE</kbd> jump · <kbd>F</kbd> fire · <kbd>R</kbd> respawn',
+        tips:       'Choose a team, set your handicap, then Ready up. The host starts when everyone is ready. A trailing team receives a small catch-up boost.',
+    },
 }
 
 export default class EntryFlow
@@ -32,6 +41,7 @@ export default class EntryFlow
         this.$menu       = document.getElementById('redline-menu')
         this.$onboarding = document.getElementById('redline-onboarding')
         this.$grain      = document.getElementById('redline-grain')
+        this.$chooseMode = document.getElementById('btn-choose-mode')
 
         this._currentMode = null
         this._screen      = 'title'
@@ -61,30 +71,27 @@ export default class EntryFlow
           .fromTo(version,  { opacity: 0 }, { opacity: 1, duration: 0.4 }, '-=0.4')
           .fromTo(prompt,   { opacity: 0 }, { opacity: 0.4, duration: 0.4 }, '-=0.1')
 
-        // Listen for any key to advance
+        // The title has one explicit action. Enter/Space mirror the button for
+        // keyboard users without making every random key skip the screen.
         this._titleHandler = (e) =>
         {
-            // Ignore modifier-only key presses
-            if(e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta') return
+            if(e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
             this._goMenu()
         }
-        document.addEventListener('keydown', this._titleHandler, { once: true })
+        document.addEventListener('keydown', this._titleHandler)
 
-        // Click also works
+        // Only the Choose Mode button advances the screen.
         this._titleClickHandler = () => this._goMenu()
-        this.$title.addEventListener('click', this._titleClickHandler, { once: true })
+        this.$chooseMode.addEventListener('click', this._titleClickHandler, { once: true })
     }
 
     _goMenu()
     {
         if(this._screen !== 'title') return
         document.removeEventListener('keydown', this._titleHandler)
-        this.$title.removeEventListener('click', this._titleClickHandler)
+        this.$chooseMode.removeEventListener('click', this._titleClickHandler)
 
-        // SHORTCUT: With Race hidden, Combat is the only mode — skip the
-        // menu and onboarding entirely. Title press-key goes straight
-        // into the game, only the lobby (name/color/car) stands between.
-        this._currentMode = 'combat'
         this._screen      = 'transitioning'
 
         const wordmark = this.$title.querySelector('.rl-wordmark')
@@ -94,10 +101,7 @@ export default class EntryFlow
             onComplete: () =>
             {
                 this.$title.classList.remove('is-active')
-                this.$grain?.classList.add('hidden')
-                this.config.gameMode = 'combat'
-                this.config.soloMode = false
-                this.onComplete?.()
+                this._showMenu()
             },
         })
         .to([wordmark, tagline, '.rl-slash', '.rl-prompt', '.rl-mode-pills'], {

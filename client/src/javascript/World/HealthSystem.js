@@ -1,7 +1,7 @@
 import EventEmitter from '../Utils/EventEmitter.js'
 
 const MAX_HP      = 100
-const RESPAWN_MS  = 3000
+const RESPAWN_MS  = 4000
 
 export default class HealthSystem extends EventEmitter
 {
@@ -10,14 +10,15 @@ export default class HealthSystem extends EventEmitter
         super()
         this.physics = _options.physics
         this.spawnPos = _options.spawnPos || { x: 5, y: -35 }
+        this.authoritative = Boolean(_options.authoritative)
         this.hp      = MAX_HP
         this._dead   = false
     }
 
-    takeDamage(amount)
+    takeDamage(amount, serverHp = null)
     {
         if(this._dead) return
-        this.hp = Math.max(0, this.hp - amount)
+        this.hp = Number.isFinite(serverHp) ? Math.max(0, serverHp) : Math.max(0, this.hp - amount)
         this.trigger('damage', [{ hp: this.hp, amount }])
         if(this.hp <= 0) this._die()
     }
@@ -29,13 +30,21 @@ export default class HealthSystem extends EventEmitter
         this.trigger('healed', [{ hp: this.hp }])
     }
 
+    syncHealth(hp, amount = 0)
+    {
+        if(this._dead || !Number.isFinite(hp)) return
+        this.hp = Math.max(0, Math.min(MAX_HP, hp))
+        this.trigger('healed', [{ hp: this.hp, amount }])
+    }
+
     isDead() { return this._dead }
+    getRespawnSeconds() { return Math.ceil(RESPAWN_MS / 1000) }
 
     _die()
     {
         this._dead = true
         this.trigger('death', [])
-        setTimeout(() => this._respawn(), RESPAWN_MS)
+        if(!this.authoritative) setTimeout(() => this._respawn(), RESPAWN_MS)
     }
 
     _respawn()
@@ -52,5 +61,13 @@ export default class HealthSystem extends EventEmitter
         body.wakeUp()
 
         this.trigger('respawn', [{ hp: this.hp }])
+    }
+
+    respawnFromServer(spawnPos = this.spawnPos, hp = MAX_HP)
+    {
+        this.spawnPos = spawnPos || this.spawnPos
+        this._dead = false
+        this.hp = hp
+        this._respawn()
     }
 }

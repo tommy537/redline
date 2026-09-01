@@ -12,6 +12,10 @@ export default class Network extends EventEmitter
         this.latency  = 0
         this.serverTimeOffset = 0     // serverTime ≈ Date.now() + offset
         this._pingInterval = null
+        this.combatLeaderboard = null
+        this.teamState = null
+        this.localTeam = null
+        this.gameMode = null
     }
 
     // Returns the current server clock estimate (used for interpolation
@@ -46,18 +50,24 @@ export default class Network extends EventEmitter
             this.trigger('disconnected')
         })
 
-        this.socket.on('room:joined', ({ id, existingPlayers, spawnPos }) =>
+        this.socket.on('room:joined', ({ id, existingPlayers, spawnPos, gameMode, team, teamState }) =>
         {
             console.log('[network] room:joined — my id=', id, 'existing=', existingPlayers, 'spawnPos=', spawnPos)
             this.localId  = id
+            this._wasJoined = true
             this.spawnPos = spawnPos   // { x, y } — used by World to position local car
-            this.trigger('room:joined', [{ id, existingPlayers, spawnPos }])
+            this.gameMode = gameMode
+            this.localTeam = team
+            if(teamState) this.teamState = teamState
+            this.trigger('room:joined', [{ id, existingPlayers, spawnPos, gameMode, team, teamState }])
         })
 
         this.socket.on('room:full', () =>
         {
             this.trigger('room:full')
         })
+
+        this.socket.on('team:full', (data) => this.trigger('team:full', [data]))
 
         this.socket.on('player:joined', (data) =>
         {
@@ -102,6 +112,9 @@ export default class Network extends EventEmitter
             console.log('[net] ← player:combatDamage received', data)
             this.trigger('player:combatDamage', [data])
         })
+        this.socket.on('player:combatHealth', (data) => this.trigger('player:combatHealth', [data]))
+        this.socket.on('player:combatRespawn', (data) => this.trigger('player:combatRespawn', [data]))
+        this.socket.on('combat:carRespawn', (data) => this.trigger('combat:carRespawn', [data]))
 
         this.socket.on('combat:explosion', (data) =>
         {
@@ -114,6 +127,24 @@ export default class Network extends EventEmitter
             console.log('[net] ← combat:carDestroyed received', data)
             this.trigger('combat:carDestroyed', [data])
         })
+
+        this.socket.on('combat:kill', (data) =>
+        {
+            this.trigger('combat:kill', [data])
+        })
+
+        this.socket.on('combat:leaderboard', (data) =>
+        {
+            this.combatLeaderboard = data
+            this.trigger('combat:leaderboard', [data])
+        })
+
+        this.socket.on('team:state', (data) =>
+        {
+            this.teamState = data
+            this.trigger('team:state', [data])
+        })
+        this.socket.on('team:startDenied', (data) => this.trigger('team:startDenied', [data]))
 
         this.socket.on('combat:meteor', (data) =>
         {
@@ -148,11 +179,10 @@ export default class Network extends EventEmitter
         }, 1500)
     }
 
-    join(name, carColor, carType = 'default')
+    join(name, carColor, carType = 'default', gameMode = 'combat', teamOptions = {})
     {
         this.localPlayerName = name
-        this._wasJoined        = true
-        this._lastJoinPayload  = { name, carColor, carType }
+        this._lastJoinPayload  = { name, carColor, carType, gameMode, ...teamOptions }
         this.socket.emit('player:join', this._lastJoinPayload)
     }
 
@@ -194,6 +224,11 @@ export default class Network extends EventEmitter
         this.socket.emit('combat:explosion', { x, y, z })
     }
 
+    sendCombatPickup(idx, type)
+    {
+        this.socket.emit('combat:pickup', { idx, type })
+    }
+
     sendCarDestroyed(x, y, z, vx, vy, color)
     {
         this.socket.emit('combat:carDestroyed', { x, y, z, vx, vy, color })
@@ -204,6 +239,21 @@ export default class Network extends EventEmitter
         // Called when the local car wakes up (reveal.go setTimeout fires)
         // Server resets its car to the same spawn position so both fall simultaneously
         this.socket.emit('player:ready')
+    }
+
+    requestTeamRematch()
+    {
+        this.socket.emit('team:rematch')
+    }
+
+    setTeamReady(ready)
+    {
+        this.socket.emit('team:setReady', { ready })
+    }
+
+    startTeamMatch()
+    {
+        this.socket.emit('team:startMatch')
     }
 
     disconnect()

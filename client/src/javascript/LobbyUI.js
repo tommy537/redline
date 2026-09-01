@@ -11,8 +11,10 @@ export default class LobbyUI
         this.$lobby = document.getElementById('lobby')
         this.$hud   = document.getElementById('mp-hud')
         this.$toast = document.getElementById('mp-toast')
+        this.$teamRoster = document.getElementById('team-roster')
 
         this._toastTimer  = null
+        this._teamRosterTimer = null
         this._onlineCount = 1
 
         // Load saved config from localStorage, fall back to defaults
@@ -20,6 +22,8 @@ export default class LobbyUI
         this._name     = saved.name     || ''
         this._colorIdx = saved.colorIdx ?? 0
         this._carType  = saved.carType  || 'default'
+        this._selectedTeam = saved.team || 'red'
+        this._handicap = saved.handicap || 'normal'
         this._step     = 0
 
         this._buildColorGrid()
@@ -27,6 +31,11 @@ export default class LobbyUI
         this._restoreSavedUI()
         this._setupQuickPlay()
         this._setupNetworkEvents()
+        if(this.config.gameMode === 'team-combat')
+        {
+            document.querySelectorAll('.team-only').forEach(el => { el.style.display = '' })
+            document.getElementById('lobby-step-label').textContent = 'Step 1 of 4'
+        }
     }
 
     // ─── Persistence ─────────────────────────────────────────────────────────
@@ -43,6 +52,8 @@ export default class LobbyUI
             name:     this._name,
             colorIdx: this._colorIdx,
             carType:  this._carType,
+            team:     this._selectedTeam,
+            handicap: this._handicap,
         }))
     }
 
@@ -109,7 +120,11 @@ export default class LobbyUI
         document.getElementById('lobby-name').style.display    = 'none'
         document.getElementById('btn-name-next').style.display = 'none'
 
-        $btn.addEventListener('click', () => this._submit())
+        $btn.addEventListener('click', () =>
+        {
+            if(this.config.gameMode === 'team-combat') this._goToStep(3)
+            else this._submit()
+        })
 
         $chg.addEventListener('click', () =>
         {
@@ -130,6 +145,8 @@ export default class LobbyUI
         const btnColorNext = document.getElementById('btn-color-next')
         const btnCarBack   = document.getElementById('btn-car-back')
         const btnPlay      = document.getElementById('btn-play')
+        const btnTeamBack  = document.getElementById('btn-team-back')
+        const btnTeamStart = document.getElementById('btn-team-start')
 
         // Allow Enter key on name field
         nameInput.addEventListener('keydown', (e) =>
@@ -160,7 +177,27 @@ export default class LobbyUI
             })
         })
 
-        btnPlay.addEventListener('click', () => this._submit())
+        btnPlay.addEventListener('click', () =>
+        {
+            if(this.config.gameMode === 'team-combat') this._goToStep(3)
+            else this._submit()
+        })
+
+        document.querySelectorAll('.team-choice').forEach(el =>
+        {
+            el.addEventListener('click', () =>
+            {
+                this._selectedTeam = el.dataset.team
+                document.querySelectorAll('.team-choice').forEach(choice =>
+                    choice.classList.toggle('selected', choice.dataset.team === this._selectedTeam))
+            })
+            el.classList.toggle('selected', el.dataset.team === this._selectedTeam)
+        })
+        const $handicap = document.getElementById('team-handicap')
+        if($handicap) $handicap.value = this._handicap
+        $handicap?.addEventListener('change', () => { this._handicap = $handicap.value })
+        btnTeamBack?.addEventListener('click', () => this._goToStep(2))
+        btnTeamStart?.addEventListener('click', () => this._submit())
 
         // Focus name input immediately
         nameInput.focus()
@@ -179,7 +216,9 @@ export default class LobbyUI
         })
 
         // Update label
-        document.getElementById('lobby-step-label').textContent = `Step ${n + 1} of 3`
+        const teamMode = this.config.gameMode === 'team-combat'
+        document.querySelectorAll('.team-only').forEach(el => { el.style.display = teamMode ? '' : 'none' })
+        document.getElementById('lobby-step-label').textContent = `Step ${n + 1} of ${teamMode ? 4 : 3}`
 
         // When returning to step 0, ensure name input is visible
         if(n === 0)
@@ -201,7 +240,11 @@ export default class LobbyUI
 
         if(this.network)
         {
-            this.network.join(this._name, this._colorIdx, this._carType)
+            this.network.join(this._name, this._colorIdx, this._carType, this.config.gameMode, {
+                preferredTeam: this._selectedTeam,
+                handicap: this._handicap,
+                fillBots: document.getElementById('team-fill-bots')?.checked ?? false,
+            })
         }
         else
         {
@@ -226,11 +269,16 @@ export default class LobbyUI
             this.showToast('Connection lost — reconnecting...')
         })
 
-        this.network.on('room:joined', ({ existingPlayers }) =>
+        this.network.on('room:joined', ({ existingPlayers, team, teamState }) =>
         {
             this._onlineCount = existingPlayers.length + 1
             this.$hud.style.display = 'block'
             this._updateHUD()
+            if(team)
+            {
+                this.showToast(`Assigned to TEAM ${team.toUpperCase()}`)
+                if(teamState) this._renderTeamState(teamState)
+            }
         })
 
         this.network.on('room:full', () =>
@@ -238,6 +286,13 @@ export default class LobbyUI
             // Show lobby again so user can try later
             this.$lobby.classList.remove('hidden')
             this.showToast('Room is full — try again later')
+        })
+
+        this.network.on('team:full', ({ team }) =>
+        {
+            this.$lobby.classList.remove('hidden')
+            this._goToStep(3)
+            this.showToast(`TEAM ${team.toUpperCase()} is full — choose the other team`)
         })
 
         this.network.on('player:joined', ({ name }) =>
@@ -252,11 +307,60 @@ export default class LobbyUI
             this._onlineCount = Math.max(1, this._onlineCount - 1)
             this._updateHUD()
         })
+
+        this.network.on('team:state', (state) =>
+        {
+            this._renderTeamState(state)
+        })
+        this.network.on('team:startDenied', ({ reason }) => this.showToast(reason, 4000))
     }
 
     _updateHUD()
     {
         if(this.$hud) this.$hud.textContent = `${this._onlineCount} online`
+    }
+
+    _renderTeamState(state)
+    {
+        if(!this.$teamRoster || this.config.gameMode !== 'team-combat') return
+
+        const $redScore = this.$teamRoster.querySelector('.tr-red-score')
+        const $blueScore = this.$teamRoster.querySelector('.tr-blue-score')
+        const $redList = document.getElementById('tr-red-list')
+        const $blueList = document.getElementById('tr-blue-list')
+
+        if($redScore) $redScore.textContent = `RED ${state.red?.score ?? 0}`
+        if($blueScore) $blueScore.textContent = `${state.blue?.score ?? 0} BLUE`
+        const $redCount = document.getElementById('team-red-count')
+        const $blueCount = document.getElementById('team-blue-count')
+        if($redCount) $redCount.textContent = `${state.red?.players?.length ?? 0} / 4`
+        if($blueCount) $blueCount.textContent = `${state.blue?.players?.length ?? 0} / 4`
+
+        const renderPlayers = ($list, players = []) =>
+        {
+            if(!$list) return
+            $list.innerHTML = ''
+            players.forEach(player =>
+            {
+                const $item = document.createElement('li')
+                const isLocal = player.id === this.network.localId
+                if(isLocal) $item.classList.add('is-you')
+                const badges = `${player.isHost ? '👑 ' : ''}${player.isBot ? '🤖 ' : ''}`
+                const ready = player.matchReady ? ' ✓' : ''
+                $item.textContent = `${badges}${isLocal ? `${player.name} (YOU)` : player.name}${ready}`
+                $list.appendChild($item)
+            })
+        }
+
+        renderPlayers($redList, state.red?.players)
+        renderPlayers($blueList, state.blue?.players)
+
+        this.$teamRoster.classList.add('visible')
+        clearTimeout(this._teamRosterTimer)
+        this._teamRosterTimer = setTimeout(() =>
+        {
+            this.$teamRoster.classList.remove('visible')
+        }, 5000)
     }
 
     showToast(message, duration = 3000)

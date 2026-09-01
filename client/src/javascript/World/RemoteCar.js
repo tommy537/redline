@@ -39,6 +39,8 @@ export default class RemoteCar
         this.name               = _options.name
         this.carColor           = _options.carColor ?? 0
         this.carType            = _options.carType  || 'default'
+        this.team               = _options.team || null
+        this.isBot              = Boolean(_options.isBot)
         this.getPhysicsWorld    = _options.getPhysicsWorld  // () => CANNON.World | null
 
         // Snapshot interpolation buffer
@@ -154,7 +156,8 @@ export default class RemoteCar
         this.label = {}
         this.label.$element = document.createElement('div')
         this.label.$element.className    = 'remote-player-label'
-        this.label.$element.textContent  = this.name
+        const teamIcon = this.team === 'red' ? '🔴' : this.team === 'blue' ? '🔵' : ''
+        this.label.$element.textContent  = `${teamIcon}${this.isBot ? ' 🤖' : ''} ${this.name}`.trim()
         this.label.$element.style.cssText = `
             position: fixed;
             background: rgba(0,0,0,0.55);
@@ -168,6 +171,7 @@ export default class RemoteCar
             white-space: nowrap;
             transform: translate(-50%, -100%);
             display: none;
+            border: 1px solid ${this.team === 'red' ? '#ff4963' : this.team === 'blue' ? '#62a5ff' : 'transparent'};
         `
         document.body.appendChild(this.label.$element)
         this.label.visible = false

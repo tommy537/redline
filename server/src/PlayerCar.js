@@ -69,13 +69,25 @@ export class PlayerCar {
     // Mirror client Physics.js exactly:
     //   accelerating is positive for forward, applied as NEGATIVE to engine
     const force        = actions.boost ? boostForce : maxForce
-    const accelerating = actions.up ? force : actions.down ? -force * 0.5 : 0
+    const analogThrottle = Number.isFinite(actions.throttle)
+      ? Math.max(-1, Math.min(1, actions.throttle))
+      : 0
+    const throttle = analogThrottle !== 0
+      ? analogThrottle
+      : actions.up ? 1 : actions.down ? -1 : 0
+    const accelerating = throttle >= 0 ? force * throttle : force * throttle * 0.5
     const engine       = -accelerating   // same sign convention as client
 
     const brake = actions.brake ? maxBrake : 0
 
-    // Steering: positive when left, applied as NEGATIVE (same as client)
-    const steering = actions.left ? maxSteer : actions.right ? -maxSteer : 0
+    // Analog steer uses the same sign as client Physics.js; legacy booleans
+    // keep their existing server convention for older clients.
+    const analogSteer = Number.isFinite(actions.steer)
+      ? Math.max(-1, Math.min(1, actions.steer))
+      : null
+    const steering = analogSteer === null
+      ? actions.left ? maxSteer : actions.right ? -maxSteer : 0
+      : analogSteer * maxSteer
     const steer    = -steering
 
     // Drive rear wheels (2=backLeft, 3=backRight — same indices as client)

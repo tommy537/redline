@@ -186,6 +186,24 @@ export default class Sounds
 
     isMuted() { return this.muted }
 
+    playTone(frequency = 440, duration = 0.12, type = 'sine', volume = 0.12)
+    {
+        if(this.muted || !Howler.ctx) return
+        const ctx = Howler.ctx
+        if(ctx.state === 'suspended') ctx.resume?.()
+        const oscillator = ctx.createOscillator()
+        const gain = ctx.createGain()
+        oscillator.type = type
+        oscillator.frequency.setValueAtTime(frequency, ctx.currentTime)
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(volume, ctx.currentTime + 0.015)
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration)
+        oscillator.connect(gain)
+        gain.connect(ctx.destination)
+        oscillator.start()
+        oscillator.stop(ctx.currentTime + duration + 0.02)
+    }
+
     setMute()
     {
         // Set up — debug mode starts muted; otherwise restore saved preference

@@ -247,7 +247,7 @@ export default class CombatPickups
                 item.mesh.visible = false
                 item.glow.visible = false
                 item.disc.visible = false
-                if(this.onCollect) this.onCollect({ type: item.type, value: item.value })
+                if(this.onCollect) this.onCollect({ idx: item.idx, type: item.type, value: item.value, x: item.x, y: item.y })
             }
         }
     }

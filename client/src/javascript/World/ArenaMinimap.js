@@ -64,6 +64,8 @@ export default class ArenaMinimap
         this.localCarColor    = _options.localCarColor ?? 0
         this.pickups          = _options.pickups || []   // [{x, y, type}]
         this.hazards          = _options.hazards || []   // [{x, y, radius, type}]
+        this.teamMode         = Boolean(_options.teamMode)
+        this.localTeam        = _options.localTeam || null
 
         this._t = 0
         this._buildCanvas()
@@ -212,7 +214,7 @@ export default class ArenaMinimap
             {
                 const pos = car.container.position
                 const c = this._toCanvas(pos.x, pos.y)
-                const color = DOT_COLORS[car.carColor % DOT_COLORS.length]
+                const color = this.teamMode ? (car.team === 'red' ? '#ff3655' : '#3f8cff') : DOT_COLORS[car.carColor % DOT_COLORS.length]
                 this._drawDot(ctx, c.x, c.y, color, 4.5)
 
                 ctx.fillStyle = 'rgba(255,255,255,0.85)'
@@ -227,7 +229,7 @@ export default class ArenaMinimap
         const lp = this._toCanvas(body.position.x, body.position.y)
         const q   = body.quaternion
         const yaw = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
-        const color = DOT_COLORS[this.localCarColor % DOT_COLORS.length]
+        const color = this.teamMode ? (this.localTeam === 'red' ? '#ff3655' : '#3f8cff') : DOT_COLORS[this.localCarColor % DOT_COLORS.length]
         this._drawArrow(ctx, lp.x, lp.y, -yaw + Math.PI / 2, color, 6)
 
         // ── Border ─────────────────────────────────────────────────────────
