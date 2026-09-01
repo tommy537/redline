@@ -456,21 +456,18 @@
 /* Mode cards */
 .rl-cards {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 320px));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--rl-6);
-    width: 100%;
-    max-width: 1080px;
+    width: min(1160px, 100%);
     margin: 0 auto;
-    padding: 0 var(--rl-4);
-    box-sizing: content-box;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 /* Tablet: three cards remain fluid so they don't overflow */
-@media (max-width: 1080px) {
+@media (max-width: 1200px) {
     .rl-cards {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
         max-width: 100%;
-        padding: 0 var(--rl-6);
     }
 }
 
@@ -496,6 +493,7 @@
     overflow: hidden;
     text-align: left;
     width: 100%;
+    min-height: clamp(280px, 29vw, 320px);
     min-width: 0;
     box-sizing: border-box;
     box-shadow:
